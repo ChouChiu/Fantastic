@@ -241,7 +241,7 @@ const duetTtml = `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3
         const larger = await lyricStyle();
         assert(Math.abs(larger.size / base.size - 1.2) < 0.01, `font size scales: ${base.size} -> ${larger.size}`);
         assert.equal(larger.weight, '700');
-        assert.deepEqual(await prefs(), { scale: 1.2, weight: 700, source: 'apple', backdrop: 'amll', pulse: false, textAutospace: true, output: 'speaker', offsets: { speaker: 0, bluetooth: 0 } });
+        assert.deepEqual(await prefs(), { scale: 1.2, weight: 700, source: 'apple', backdrop: 'amll', pulse: false, textAutospace: true, translation: true, pronunciation: false, output: 'speaker', offsets: { speaker: 0, bluetooth: 0 } });
         // 歌词提前：扬声器、蓝牙各记一个值，每档 10 毫秒，保存在浏览器中
         const lead = () => page.locator('.lyrics-menu-value').nth(2).textContent();
         for (let i = 0; i < 3; i++) await page.locator('[data-action="offsetEarlier"]').click();
