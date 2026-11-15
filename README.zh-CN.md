@@ -13,7 +13,7 @@
 
 中文 | [English](README.md)
 
-![Fantastic：桌面端的新发现页与手机上的专辑页](docs/home.zh-CN.png)
+![Fantastic：桌面端的新发现页与手机上的专辑页](docs/screenshots/home.zh-CN.png)
 
 </div>
 
@@ -104,20 +104,19 @@ fantastic --listen 0.0.0.0:8888 \
 
 浏览器打开 `http://127.0.0.1:8888/`，粘贴 Apple Music 链接或直接搜索。也可以把链接拼在地址后面直接打开，如 `http://127.0.0.1:8888/https://music.apple.com/cn/album/...`。
 
-- 不想运行二进制：可一键部署到 [Vercel / Cloudflare](docs/guide.zh-CN.md#serverless-部署vercel--cloudflare)（不含 QQ 音源）。
-- 没有服务端 wrapper-lite：页面可切换为[本地 wrapper-lite](docs/guide.zh-CN.md#使用本地-wrapper-lite)，由浏览器直接请求。
+- 不想运行二进制：可一键部署到 [Vercel / Cloudflare](docs/deployment.zh-CN.md#serverless-部署vercel--cloudflare)（不含 QQ 音源）。
+- 没有服务端 wrapper-lite：页面可切换为[本地 wrapper-lite](docs/deployment.zh-CN.md#使用本地-wrapper-lite)，由浏览器直接请求。
 - QQ 音源的代理、请求路径与歌词格式见 [QQ 音源规格](docs/qq-source-validation.md)与 [QQ 音质规格](docs/qq-quality-validation.md)。
 
 ## 文档
 
-完整说明移到了 [docs/guide.zh-CN.md](docs/guide.zh-CN.md)：
-
-- [运行环境与链接格式](docs/guide.zh-CN.md#运行环境)
-- [部署（Serverless、本地 wrapper-lite、QQ 音源）](docs/guide.zh-CN.md#部署)
-- [使用指南（播放器、歌词、MV、电台、资料库、下载）](docs/guide.zh-CN.md#使用指南)
-- [工作原理](docs/guide.zh-CN.md#工作原理)
-- [命令行参数与服务端接口](docs/guide.zh-CN.md#参考)
-- [构建、测试与项目结构](docs/guide.zh-CN.md#开发)
+| 文档 | 内容 |
+| --- | --- |
+| [使用指南](docs/guide.zh-CN.md) | 运行环境、QQ 音乐、播放器、歌词、MV、电台、资料库与下载 |
+| [部署说明](docs/deployment.zh-CN.md) | Serverless、本地 wrapper-lite 与 QQ 音源配置 |
+| [参考](docs/reference.zh-CN.md) | 命令行参数与服务端接口 |
+| [架构](docs/architecture.zh-CN.md) | 工作原理、功能与文件对照、目录结构 |
+| [开发说明](docs/development.zh-CN.md) | 构建、测试与资源维护 |
 
 ## 交流群
 
@@ -127,4 +126,4 @@ fantastic --listen 0.0.0.0:8888 \
 
 Fantastic 以 [GNU Affero 通用公共许可证 v3.0（仅此版本）](LICENSE)（AGPL-3.0-only）发布，因为 Web 界面内嵌了以 AGPL 授权的 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 歌词播放器。如果将修改后的版本作为网络服务运行，需要向其用户提供对应的源代码。
 
-内置的第三方组件保留各自的许可证：`crates/temari`（MIT）、hls.js CEA-608 解析器（Apache-2.0，`browser/cea608/LICENSE`）、`@mediabunny/ac3`（MPL-2.0，`src/ui/EC3-LICENSE.txt`）、AMLL 及其依赖（AGPL-3.0-only，`browser/amll`）、来自 am-hook-joc 的 JOC 渲染器（AGPL-3.0-only 或 MIT，`crates/joc-core/LICENSE`）、来自 YouLyPlus 的歌词封面背景（MIT，声明见 `src/ui/lyrics/backdrop-render.mjs`），以及 SADIE II HRTF 场（Apache-2.0，见 `src/ui/JOC-NOTICE.md`）。
+内置的第三方组件保留各自的许可证：`crates/temari`（MIT）、hls.js CEA-608 解析器（Apache-2.0，`vendor/cea608/LICENSE`）、`@mediabunny/ac3`（MPL-2.0，`web/ec3/LICENSE.txt`）、AMLL 及其依赖（AGPL-3.0-only，`vendor/amll`）、来自 am-hook-joc 的 JOC 渲染器（AGPL-3.0-only 或 MIT，`crates/joc-core/LICENSE`）、来自 YouLyPlus 的歌词封面背景（MIT，声明见 `web/lyrics/backdrop-render.mjs`），以及 SADIE II HRTF 场（Apache-2.0，见 `web/joc/NOTICE.md`）。

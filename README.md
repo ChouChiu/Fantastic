@@ -13,7 +13,7 @@
 
 [中文](README.zh-CN.md) | English
 
-![Fantastic: the New page on desktop and an album page on a phone](docs/home.png)
+![Fantastic: the New page on desktop and an album page on a phone](docs/screenshots/home.png)
 
 </div>
 
@@ -104,20 +104,19 @@ fantastic --listen 0.0.0.0:8888 \
 
 Open `http://127.0.0.1:8888/` and paste an Apple Music link or search. You can also append a link to the address, e.g. `http://127.0.0.1:8888/https://music.apple.com/us/album/...`.
 
-- No binary: deploy with one click to [Vercel / Cloudflare](docs/guide.md#serverless-deployment-vercel--cloudflare) (without the QQ source).
-- No server-side wrapper-lite: switch the page to a [local wrapper-lite](docs/guide.md#using-a-local-wrapper-lite) that the browser calls directly.
+- No binary: deploy with one click to [Vercel / Cloudflare](docs/deployment.md#serverless-deployment-vercel--cloudflare) (without the QQ source).
+- No server-side wrapper-lite: switch the page to a [local wrapper-lite](docs/deployment.md#using-a-local-wrapper-lite) that the browser calls directly.
 - QQ proxying, request paths and lyric formats: [QQ source spec](docs/qq-source-validation.md) and [QQ quality spec](docs/qq-quality-validation.md) (Chinese).
 
 ## Documentation
 
-The full documentation lives in [docs/guide.md](docs/guide.md):
-
-- [Requirements and link formats](docs/guide.md#running)
-- [Deployment (serverless, local wrapper-lite, QQ source)](docs/guide.md#deployment)
-- [User guide (player, lyrics, music videos, radio, library, downloads)](docs/guide.md#user-guide)
-- [How it works](docs/guide.md#how-it-works)
-- [Command-line options and server endpoints](docs/guide.md#reference)
-- [Building, testing and project layout](docs/guide.md#development)
+| Document | Contents |
+| --- | --- |
+| [User guide](docs/guide.md) | Requirements, QQ Music, player, lyrics, music videos, radio, library and downloads |
+| [Deployment](docs/deployment.md) | Serverless, local wrapper-lite and QQ source configuration |
+| [Reference](docs/reference.md) | Command-line options and server endpoints |
+| [Architecture](docs/architecture.md) | How it works, feature-to-file map and project layout |
+| [Development](docs/development.md) | Building, testing and asset maintenance |
 
 ## Community
 
@@ -127,4 +126,4 @@ Questions, feedback and discussion: the Telegram group [@apple_music_alac](https
 
 Fantastic is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) (AGPL-3.0-only), because the web UI embeds the AGPL-licensed [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) lyric player. If you run a modified version as a network service, you must offer its users the corresponding source.
 
-Bundled third-party components keep their own licenses: `crates/temari` (MIT), the hls.js CEA-608 parser (Apache-2.0, `browser/cea608/LICENSE`), `@mediabunny/ac3` (MPL-2.0, `src/ui/EC3-LICENSE.txt`), AMLL with its dependencies (AGPL-3.0-only, `browser/amll`), the JOC renderer from am-hook-joc (AGPL-3.0-only or MIT, `crates/joc-core/LICENSE`), the lyric artwork background from YouLyPlus (MIT, notice in `src/ui/lyrics/backdrop-render.mjs`) and the SADIE II HRTF fields (Apache-2.0, see `src/ui/JOC-NOTICE.md`).
+Bundled third-party components keep their own licenses: `crates/temari` (MIT), the hls.js CEA-608 parser (Apache-2.0, `vendor/cea608/LICENSE`), `@mediabunny/ac3` (MPL-2.0, `web/ec3/LICENSE.txt`), AMLL with its dependencies (AGPL-3.0-only, `vendor/amll`), the JOC renderer from am-hook-joc (AGPL-3.0-only or MIT, `crates/joc-core/LICENSE`), the lyric artwork background from YouLyPlus (MIT, notice in `web/lyrics/backdrop-render.mjs`) and the SADIE II HRTF fields (Apache-2.0, see `web/joc/NOTICE.md`).
