@@ -132,7 +132,7 @@ const album = {
 
     // 5. 歌单页：两首，键盘排序（把手上按 ↑），从歌单中删除
     await page.locator('#nav-playlists a').click();
-    await page.locator('#view .lib-track').nth(1).waitFor();
+    await page.locator('#view .lib-playlist-tracks .lib-grip').nth(1).waitFor();
     assert.deepEqual(await rowTitles(), ['First Song', 'Third Song']);
     await page.locator('#view .lib-grip').nth(1).focus();
     await page.keyboard.press('ArrowUp');
@@ -212,7 +212,7 @@ const album = {
     await page.locator('#fav-only').click();
     await page.locator('#nav [data-nav="library:favorite-songs"]').click();
     await page.waitForURL('**/library/favorite-songs', { waitUntil: 'commit' });
-    await page.locator('#view .lib-track').first().waitFor();
+    await page.locator('#view .lib-playlist-tracks .lib-track').first().waitFor();
     assert.equal(await page.locator('#title').textContent(), 'Favorite Songs');
     assert.deepEqual(await rowTitles(), ['Second Song']);
     assert.equal(await page.locator('.detail-actions button:not([hidden])').count(), 3, 'Favorite Songs header keeps three buttons');
@@ -290,7 +290,7 @@ const album = {
     assert.match(await page.locator('.lib-dialog-message').textContent(), /2 playlists and 1 subfolders/);
     await page.locator('.lib-dialog .primary').click();
     await page.waitForURL('**/library/all-playlists', { waitUntil: 'commit' });
-    await page.locator('#view .lib-grid .shelf-title').first().waitFor();
+    await page.locator('#view .lib-grid .shelf-title').filter({ hasText: /^Favorite Songs$/ }).waitFor();
     assert.deepEqual(await page.locator('#view .lib-grid .shelf-title').allTextContents(), ['Favorite Songs'], 'folder deleted with its playlists');
     assert.equal(await page.locator('#nav-playlists li').count(), 0);
 
