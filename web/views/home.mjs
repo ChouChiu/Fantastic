@@ -2,6 +2,7 @@
 import { albumPathOf, createActions } from './actions.mjs';
 import * as qq from '../sources/qq.mjs';
 import { trackKey } from '../sources/track.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { AmI18n } = window;
 const { t } = AmI18n;
@@ -153,11 +154,11 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
     const url = new URL('/amp' + path, location.origin);
     // 值为 undefined 的参数不传（如地区不支持当前语言时的 l）
     for (const [key, value] of Object.entries(params || {})) if (value !== undefined) url.searchParams.set(key, value);
-    let res = await fetch(url, { signal });
+    let res = await ampFetch(url, { signal });
     // 地区不支持所选语言时去掉 l，改用地区默认语言
     if (res.status === 400 && url.searchParams.has('l')) {
       url.searchParams.delete('l');
-      res = await fetch(url, { signal });
+      res = await ampFetch(url, { signal });
     }
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);

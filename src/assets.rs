@@ -113,6 +113,7 @@ pub static ASSETS: &[Asset] = &[
     asset!("host.js"),
     asset!("wrapper.js"),
     asset!("station.mjs"),
+    asset!("amp-fetch.mjs"),
     asset!("motion-art.mjs"),
     asset!("alac-check.mjs"),
     // 播放器（MSE / PCM / JOC 引擎、混音与队列）与歌曲之间的过渡（AutoMix / 交叉淡化）的规划

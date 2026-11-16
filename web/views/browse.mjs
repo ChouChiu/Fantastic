@@ -13,6 +13,7 @@ import { trackKey } from '../sources/track.mjs';
 // 货架的列数与官网 shelf-grid 的 grid-type 相同（见 app.css .ed-shelf）。
 import { createActions, targetOf, pagePath, songEntry, playable, artistLinks } from './actions.mjs';
 import { userToken, personalStation, recentStations } from '/assets/station.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { formatTime } = window.AmHook;
 const { AmDecrypt, AmI18n } = window;
@@ -117,7 +118,7 @@ function chartGenres(cc, l) {
   if (!genreCache.has(key)) {
     const target = new URL(`/amp/v1/catalog/${cc}/genres`, location.origin);
     if (l) target.searchParams.set('l', l);
-    const pending = fetch(target).then((res) => (res.ok ? res.json() : null)).then((data) => ((data && data.data) || []).filter((g) => g.attributes && g.attributes.name));
+    const pending = ampFetch(target).then((res) => (res.ok ? res.json() : null)).then((data) => ((data && data.data) || []).filter((g) => g.attributes && g.attributes.name));
     // 取不到时不缓存，页面照常显示（只是没有类型选择）
     pending.then((list) => { if (!list.length) genreCache.delete(key); }, () => genreCache.delete(key));
     genreCache.set(key, pending.catch(() => []));
@@ -210,11 +211,11 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
     const target = new URL('/amp' + path, location.origin);
     // 值为 undefined 的参数不传（如地区不支持当前语言时的 l）
     for (const [key, value] of Object.entries(params || {})) if (value !== undefined) target.searchParams.set(key, value);
-    let res = await fetch(target);
+    let res = await ampFetch(target);
     // amp-api 偶尔返回 5xx（如 charts 的「Service failure」），稍等后重试一次
     if (res.status >= 500) {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      res = await fetch(target);
+      res = await ampFetch(target);
     }
     // 地区不支持所选语言时去掉 l，改用地区默认语言
     if (res.status === 400 && target.searchParams.has('l')) {

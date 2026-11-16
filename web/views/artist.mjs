@@ -1,6 +1,7 @@
 import { trackKey } from '../sources/track.mjs';
 // 艺人页（/https://music.apple.com/{cc}/artist/{slug}/{id}），由 app.mjs 挂载
 import { createActions, targetOf } from './actions.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { formatTime } = window.AmHook;
 const { AmDecrypt, AmI18n } = window;
@@ -77,10 +78,10 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
     const url = new URL('/amp' + path, location.origin);
     // 值为 undefined 的参数不传（如地区不支持当前语言时的 l）
     for (const [key, value] of Object.entries(params || {})) if (value !== undefined) url.searchParams.set(key, value);
-    let res = await fetch(url);
+    let res = await ampFetch(url);
     if (res.status === 400 && url.searchParams.has('l')) {
       url.searchParams.delete('l');
-      res = await fetch(url);
+      res = await ampFetch(url);
     }
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);

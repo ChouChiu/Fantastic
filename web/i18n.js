@@ -3879,7 +3879,7 @@
     const map = {};
     // 跟随分页 next（如 /v1/storefronts?offset=25），经 /amp 代理
     for (let path = '/v1/storefronts', page = 0; path && page < 20; page++) {
-      const res = await fetch('/amp' + path);
+      const res = await (globalThis.ampFetch || fetch)('/amp' + path);
       if (!res.ok) throw new Error(`storefronts ${res.status}`);
       const data = await res.json();
       for (const item of (data && data.data) || []) {

@@ -10,6 +10,7 @@ import { createDetailHeader } from './detail-header.mjs';
 import { openDownloadDialog } from './download-dialog.mjs';
 import { stationKind, withToken, askToken, onTokenChange, nextTracks, playAssets } from '/assets/station.mjs';
 import { buildIlst, imageType } from '/assets/download/mp4-tags.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { formatTime } = window.AmHook;
 const { AmDecrypt, AmI18n } = window;
@@ -48,10 +49,10 @@ function plainText(html) {
 async function amp(path, params) {
   const target = new URL('/amp' + path, location.origin);
   for (const [key, value] of Object.entries(params || {})) if (value !== undefined) target.searchParams.set(key, value);
-  let res = await fetch(target);
+  let res = await ampFetch(target);
   if (res.status === 400 && target.searchParams.has('l')) {
     target.searchParams.delete('l');
-    res = await fetch(target);
+    res = await ampFetch(target);
   }
   const data = await res.json().catch(() => null);
   if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);
