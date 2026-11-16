@@ -350,12 +350,12 @@ export function lyricLines(result) {
   return (result?.song?.lines || []).filter((line) => typeof line.text === 'string' && line.text.trim())
     .map((line) => ({ text: line.text, translation: line.translation || '' }));
 }
-/** 默认用 QQ 自己的逐字 QRC；歌词来源选了 AMLL 歌词库时 AMLL 优先 */
-export const LYRIC_PRIORITY = ['qrc', 'ttml', 'lrc', 'amll'];
-export const AMLL_LYRIC_PRIORITY = ['amll', 'qrc', 'ttml', 'lrc'];
+/** 默认 AMLL 歌词库优先，其次 QQ 的逐字 QRC、逐行 LRC；歌词来源选了 QRC 时 QRC 优先 */
+export const LYRIC_PRIORITY = ['amll', 'qrc', 'lrc'];
+export const QRC_LYRIC_PRIORITY = ['qrc', 'amll', 'lrc'];
 // Try the next source if a candidate is empty, malformed or has no timed lines.
 export function selectLyrics(candidates, parse, prefer) {
-  for (const source of prefer === 'amll' ? AMLL_LYRIC_PRIORITY : LYRIC_PRIORITY) {
+  for (const source of prefer === 'qrc' ? QRC_LYRIC_PRIORITY : LYRIC_PRIORITY) {
     for (const candidate of candidates || []) {
       if (candidate.source !== source || typeof candidate.text !== 'string' || !candidate.text.trim()) continue;
       try {
