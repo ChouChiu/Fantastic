@@ -297,15 +297,24 @@ const parse = (text) => {
   if (text === 'malformed') throw new Error('invalid XML');
   return { lines: text === 'empty' ? [] : [{ text }] };
 };
-test('QQ lyrics prefer AMLL, upstream TTML, QRC, then LRC regardless of response order', () => {
-  const sources = ['lrc', 'qrc', 'ttml', 'amll'];
-  for (const expected of ['amll', 'ttml', 'qrc', 'lrc']) {
+test('QQ lyrics prefer AMLL, then QRC and LRC regardless of response order; TTML is not used', () => {
+  const sources = ['lrc', 'ttml', 'qrc', 'amll'];
+  for (const expected of ['amll', 'qrc', 'lrc']) {
     assert.equal(qq.selectLyrics(sources.map((s) => candidate(s)), parse).source, expected);
+    sources.splice(sources.indexOf(expected), 1);
+  }
+  assert.deepEqual(qq.selectLyrics([candidate('ttml')], parse), { song: null });
+});
+test('choosing QRC puts QRC first, then AMLL and LRC', () => {
+  const sources = ['lrc', 'ttml', 'amll', 'qrc'];
+  for (const expected of ['qrc', 'amll', 'lrc']) {
+    assert.equal(qq.selectLyrics(sources.map((s) => candidate(s)), parse, 'qrc').source, expected);
     sources.splice(sources.indexOf(expected), 1);
   }
 });
 test('missing, blank, malformed and untimed lyrics fall through without blocking LRC', () => {
-  assert.equal(qq.selectLyrics([candidate('amll', 'malformed'), candidate('ttml', 'empty'), candidate('qrc', ' '), candidate('lrc')], parse).source, 'lrc');
+  assert.equal(qq.selectLyrics([candidate('amll', 'malformed'), candidate('qrc', ' '), candidate('lrc')], parse).source, 'lrc');
+  assert.equal(qq.selectLyrics([candidate('qrc', 'malformed'), candidate('amll', 'empty'), candidate('lrc')], parse, 'qrc').source, 'lrc');
   assert.equal(qq.selectLyrics([candidate('ttml', null), candidate('qrc', {}), candidate('lrc')], parse).source, 'lrc');
   assert.deepEqual(qq.selectLyrics(undefined, parse), { song: null });
   assert.deepEqual(qq.selectLyrics([candidate('apple'), candidate('unknown')], parse), { song: null });

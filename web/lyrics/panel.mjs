@@ -23,7 +23,7 @@
  * 待播清单打开时占据歌词的位置。
  */
 import { parseTTML, duetSides } from './ttml.mjs';
-import { lyrics as qqLyrics } from '../sources/qq.mjs';
+import { lyrics as qqLyrics, LYRIC_PRIORITY, QRC_LYRIC_PRIORITY } from '../sources/qq.mjs';
 import {
   DomLyricPlayer,
   setWordSegmenter,
@@ -228,7 +228,7 @@ const AMLL_RENDERERS = { amll: MeshGradientRenderer, isolation: IsolationRendere
  */
 const AMLL_PULSE = 0.4;
 const DEFAULT_PREFS = {
-  scale: 1, weight: 600, source: 'apple', backdrop: 'amll', pulse: false, textAutospace: true,
+  scale: 1, weight: 600, source: 'apple', qqSource: 'amll', backdrop: 'amll', pulse: false, textAutospace: true,
   translation: false, pronunciation: false, output: 'speaker', offsets: { speaker: 0, bluetooth: 0 },
 };
 /** 扬声器、蓝牙的输出延迟不同，各记一个「歌词提前」 */
@@ -240,6 +240,7 @@ function loadPrefs() {
       scale: FONT_SCALES.includes(saved.scale) ? saved.scale : DEFAULT_PREFS.scale,
       weight: FONT_WEIGHTS.includes(saved.weight) ? saved.weight : DEFAULT_PREFS.weight,
       source: saved.source === 'amll' ? 'amll' : DEFAULT_PREFS.source,
+      qqSource: saved.qqSource === 'qrc' ? 'qrc' : DEFAULT_PREFS.qqSource,
       backdrop: saved.backdrop === 'classic' ? 'artwork' : BACKDROPS.includes(saved.backdrop) ? saved.backdrop : DEFAULT_PREFS.backdrop,
       pulse: typeof saved.pulse === 'boolean' ? saved.pulse : DEFAULT_PREFS.pulse,
       textAutospace: typeof saved.textAutospace === 'boolean' ? saved.textAutospace : DEFAULT_PREFS.textAutospace,
@@ -881,7 +882,10 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
 
   /** 选定的来源没有这首歌的歌词、改用另一来源时的说明 */
   function sourceNote() {
-    if (trackSource === 'qq') return lyricsSource ? t('qq.lyricsSource', { source: lyricsSource.toUpperCase() }) : t('qq.lyricsPriority');
+    if (trackSource === 'qq') {
+      return lyricsSource ? t('qq.lyricsSource', { source: lyricsSource.toUpperCase() })
+        : t('qq.lyricsPriority', { order: (prefs.qqSource === 'qrc' ? QRC_LYRIC_PRIORITY : LYRIC_PRIORITY).map((s) => s.toUpperCase()).join(' → ') });
+    }
     if (!lyricsSource || lyricsSource === prefs.source) return '';
     if (prefs.source === 'apple') return t('lyrics.appleMissing');
     return t(amllStatus === 'failed' ? 'lyrics.amllFailed' : 'lyrics.amllMissing');
@@ -1199,10 +1203,14 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
       ...fontItems(),
       separator(),
       menuItem(menuNode('span', '', t('lyrics.source')), 'presentation', 'lyrics-menu-heading'),
-      ...(trackSource === 'qq' ? [] : ['apple', 'amll']).map((source) => menuItem(menuButton({
-        label: t(source === 'apple' ? 'lyrics.sourceApple' : 'lyrics.sourceAmll'),
-        icon: prefs.source === source ? 'check' : '', action: 'source', value: source, checked: prefs.source === source,
-      }))),
+      // QQ 的歌曲另存一项（prefs.qqSource）：'amll' 为 AMLL 歌词库优先（默认），'qrc' 为 QQ 的 QRC 优先
+      ...(trackSource === 'qq' ? ['amll', 'qrc'] : ['apple', 'amll']).map((source) => {
+        const selected = (trackSource === 'qq' ? prefs.qqSource : prefs.source) === source;
+        return menuItem(menuButton({
+          label: t({ apple: 'lyrics.sourceApple', amll: 'lyrics.sourceAmll', qrc: 'lyrics.sourceQrc' }[source]),
+          icon: selected ? 'check' : '', action: 'source', value: source, checked: selected,
+        }));
+      }),
       ...(note ? [menuItem(menuNode('span', '', note), 'presentation', 'lyrics-menu-note')] : []),
       separator(),
       menuItem(menuNode('span', '', t('lyrics.backdrop')), 'presentation', 'lyrics-menu-heading'),
@@ -1281,11 +1289,14 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
 
   /** 改歌词来源后重新取这首歌的歌词；结果不是选定的来源时提示原因 */
   function setSource(source) {
-    if (source === prefs.source) return;
-    prefs.source = source;
+    const key = trackSource === 'qq' ? 'qqSource' : 'source';
+    if (source === prefs[key]) return;
+    prefs[key] = source;
     savePrefs(prefs);
     // 还没请求过的歌曲在打开时按新来源请求；正在加载的按新来源重新请求
-    if (!adamId || !request || lyricsSource === source) return;
+    // QQ 歌曲显示的是 AMLL 以外的来源（QRC 或 LRC）时，等同于选了 'qrc'
+    const shown = trackSource === 'qq' && lyricsSource && lyricsSource !== 'amll' ? 'qrc' : lyricsSource;
+    if (!adamId || !request || shown === source) return;
     const id = adamId;
     request = null;
     fetchLyrics().then(() => {
@@ -1366,7 +1377,7 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
    * 选了 AMLL 歌词库时先查它，未收录、请求失败或解析不了时记下原因，改用 Apple Music 歌词。
    */
   async function loadLyrics(id) {
-    if (trackSource === 'qq') return qqLyrics(id, parseWithUiLanguage);
+    if (trackSource === 'qq') return qqLyrics(id, parseWithUiLanguage, undefined, prefs.qqSource);
     // 这首歌各来源的结果记在 sources 里，来回切换来源时不重复请求；AMLL 歌词库未收录时不记，下次选择时重新查
     const cache = sources;
     const remember = (source, fetcher) => (cache[source] ??= fetcher().then((result) => {
