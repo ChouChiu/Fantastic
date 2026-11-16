@@ -571,20 +571,28 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
   });
 
   // AMLL 换行时给逐词动画设好 currentTime 再 play()，动画要等这一帧提交后才开始计时，手机上换行那一帧很重，
-  // 整行就落后这一帧的时间，直到下一行。动画刚从挂起转为运行时，按播放进度把它的 currentTime 直接改对一次
-  // （运行中的动画改 currentTime 不会再挂起），之后照常按页面时钟走，不受播放进度读数抖动的影响
+  // 整行就落后这一帧的时间。动画刚从挂起转为运行时，按播放进度把它的 currentTime 直接改对一次
+  // （运行中的动画改 currentTime 不会再挂起）。之后每 250ms 再比一次：长帧、后台节流等让动画和声音错开时，
+  // 小偏差微调 playbackRate 在下一个 250ms 内追平（不跳），偏差过大才直接改 currentTime
+  const ALIGN_INTERVAL = 250;
+  const DRIFT_TOLERANCE = 20;
+  const DRIFT_SNAP = 400;
+  const MAX_RATE_DELTA = 0.2;
   const startedAnimations = new WeakSet();
-  function alignStarted(time) {
+  let lastAlign = 0;
+  function alignWords(timestamp, time) {
     const groups = view.currentLyricGroups;
     const highlighted = view.timelineController?.getSnapshot().highlightedGroups;
     if (!groups || !highlighted) return;
+    const periodic = timestamp - lastAlign >= ALIGN_INTERVAL;
+    if (periodic) lastAlign = timestamp;
     for (const index of highlighted) {
-      alignLine(groups[index]?.mainLine, time);
-      alignLine(groups[index]?.bgLine, time);
+      alignLine(groups[index]?.mainLine, time, periodic);
+      alignLine(groups[index]?.bgLine, time, periodic);
     }
   }
 
-  function alignLine(line, time) {
+  function alignLine(line, time, periodic) {
     if (!line) return;
     const expected = time - line.getLine().startTime;
     const check = (a) => {
@@ -592,12 +600,23 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
         startedAnimations.delete(a);
         return;
       }
-      if (startedAnimations.has(a)) return;
-      startedAnimations.add(a);
-      if (!(expected >= 0) || a.playbackRate !== 1 || a.currentTime == null) return;
+      const started = !startedAnimations.has(a);
+      if (started) startedAnimations.add(a);
+      else if (!periodic) return;
+      // AMLL 只用 1（正放）和 -1（收起时倒放）；倒放的或别处改过速率的不碰
+      if (!(expected >= 0) || a.currentTime == null || Math.abs(a.playbackRate - 1) > MAX_RATE_DELTA + 0.01) return;
       const timing = a.effect?.getComputedTiming();
       const end = Number(timing?.delay ?? 0) + Number(timing?.duration ?? 0);
-      if (expected < end && Math.abs(a.currentTime - expected) > 16) a.currentTime = expected;
+      if (expected >= end || a.currentTime >= end) return;
+      const drift = expected - a.currentTime;
+      if (started ? Math.abs(drift) > 16 : Math.abs(drift) > DRIFT_SNAP) {
+        a.currentTime = expected;
+        a.playbackRate = 1;
+      } else if (!started) {
+        a.playbackRate = Math.abs(drift) > DRIFT_TOLERANCE
+          ? 1 + Math.max(-MAX_RATE_DELTA, Math.min(MAX_RATE_DELTA, drift / ALIGN_INTERVAL))
+          : 1;
+      }
     };
     for (const word of line.splittedWords || []) word.elementAnimations?.forEach(check);
     line.maskAnimator?.animations?.forEach(check);
@@ -624,7 +643,7 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
     if (lyricsVisible) {
       const time = viewTime(transport ? transport.currentTime * 1000 : 0);
       view.setCurrentTime(time);
-      if (running) alignStarted(time);
+      if (running) alignWords(timestamp, time);
       view.update(lastFrame ? timestamp - lastFrame : 0);
     }
     lastFrame = timestamp;
