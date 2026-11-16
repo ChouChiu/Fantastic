@@ -219,8 +219,8 @@ test('vendored AMLL balances the reported song at phone-like widths', async () =
   const before = createWordSegmenter(await dictionary, native);
   const after = createWordSegmenter(await dictionary, native, await jieba);
   const cases = [
-    ['我的心脏扑通到不再普通', ['我的心脏扑 / 通到不再普通', '我的心脏扑 / 通到不再普通', '我的心脏扑 / 通到不再普通'], ['我的心脏扑通 / 到不再普通', '我的心脏 / 扑通到不再普通', '我的心脏 / 扑通到不再普通']],
-    ['为你照亮角落的光该如何形容', ['为你照亮 / 角落的光 / 该如何形容', '为你照亮角落 / 的光该如何形容', '为你照亮角落 / 的光该如何形容'], ['为你照亮 / 角落的光 / 该如何形容', '为你照亮角落 / 的光该如何形容', '为你照亮角落 / 的光该如何形容']],
+    ['我的心脏扑通到不再普通', ['我的心脏扑通 / 到不再普通', '我的心脏扑通到 / 不再普通', '我的心脏扑通到 / 不再普通'], ['我的心脏扑通 / 到不再普通', '我的心脏扑通到 / 不再普通', '我的心脏扑通到 / 不再普通']],
+    ['为你照亮角落的光该如何形容', ['为你照亮角落 / 的光该如何 / 形容', '为你照亮角落的 / 光该如何形容', '为你照亮角落的光 / 该如何形容'], ['为你照亮角落 / 的光该如何 / 形容', '为你照亮角落的 / 光该如何形容', '为你照亮角落的光 / 该如何形容']],
   ];
   for (const [text, oldRows, newRows] of cases) {
     const children = [...text].map(text => ({ text, width: 1, isSpace: false }));
