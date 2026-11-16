@@ -34,9 +34,11 @@ Apple Music 网页播放器与下载器：Rust 小服务端（或一个 serverle
 | AutoMix / 交叉淡化 | 规划 `web/player/automix.js`（纯函数，`tests/unit/automix.cjs`），执行 `player.js` 的 `Mixer`/`Voice` |
 | MV 播放 / 下载 / 字幕 | `web/mv/engine.mjs`、`mv/hls.mjs`、`mv/captions.mjs`；Worker `media/`；Rust `crates/am-media`；服务端 `/parse/mv*` |
 | 电台 / 广播 | `web/station.mjs`（token、license 格式）、`mv/radio.mjs`（HLS）、`views/station.mjs`；服务端 `amp.rs` 的 `station_*` |
-| 曲库页面空白、搜索无结果 | `amp.rs`（developer token 抓取、缓存）或 `serverless/core.mjs`；页面 `web/views/<页面>.mjs` |
+| 曲库页面空白、搜索无结果 | `amp.rs`（developer token 抓取、缓存）或 `serverless/core.mjs`；页面 `web/views/<页面>.mjs`；公共请求 `web/amp.mjs` |
+| 首页类别浏览空白 / 砖块链接不对 | `web/views/categories.mjs`（`recommendations/{cc}?name=search-landing`）、`views/links.mjs` 的 `resolveLink`；服务端 `amp.rs::recommendations_handler` |
 | 歌词 | `web/lyrics/panel.mjs`（接播放器）、`ttml.mjs`、`fonts.mjs`；服务端 `handlers.rs::lyrics_handler` |
 | 下载文件名、标签、ZIP | `web/download/`（`naming.mjs`、`mp4-tags.mjs`、`zip.mjs`）；调度 `downloads.mjs`；下载中心 `center.mjs` |
+| 动态封面下载、封面右键 / 长按菜单 | `web/download/motion.mjs`（选档、分片 → MP4）、`views/artwork-menu.mjs`；页面经 `data-motion` / `data-artwork-name` 提供片源与文件名（`detail-header.mjs`、`artist.mjs`） |
 | 资料库 / 歌单 | `web/library.mjs`（IndexedDB 与导入导出）、`views/library*.mjs` |
 | 设置项与默认值 | `web/prefs.mjs` 的 `DEFAULTS` / `OPTIONS`；设置页 `views/settings.mjs`；导航选择面板 `pickers.mjs` |
 | 界面文字 | `web/i18n.js`（中英文两份，键名相同） |
@@ -57,6 +59,9 @@ Apple Music 网页播放器与下载器：Rust 小服务端（或一个 serverle
 - 改了 `crates/` 中 wasm 相关 crate：运行 `scripts/build-wasm.sh`（需要 `wasm-opt`），提交 `web/` 下更新的 `.wasm`。
 - `crates/joc-core` 与 `tests/unit/joc_wasm.mjs` 按参考实现**逐位**比对 SHA-256：不要改变浮点运算顺序。
 - 服务端接口改动要同时改 `src/`（`handlers.rs`/`amp.rs`）与 `serverless/core.mjs`，`tests/unit/serverless.mjs` 覆盖后者。
+- 所有响应带 CSP（`src/security.rs`：`script-src 'self' 'wasm-unsafe-eval'`）：不能用内联脚本、`on*=` 属性、`eval`/`new Function`
+  或外站脚本。改响应头要同时改 `security.rs`、`serverless/core.mjs` 的 `SECURITY_HEADERS` 与 `vercel.json`（测试比对三处）。
+  live 测试经 `tests/support/playwright-bypass-csp.cjs` 绕过 CSP，只有 `csp_live.cjs` 在 CSP 下检查。
 - 界面文字中英文都要有；README 与 `docs/` 中英文两份同步更新（`release.zh-CN.md` 只有中文）。
 - 代码注释用中文；提交信息用英文 conventional 格式（`feat(lyrics): …`、`fix(player): …`），功能提交不改 CHANGELOG，
   发布时统一写（见 [docs/release.zh-CN.md](docs/release.zh-CN.md)）。

@@ -7,6 +7,13 @@ use std::time::Duration;
 use fantastic::state::{AppState, Config};
 use axum::Router;
 
+/// serverless 部署交给页面的版本号（serverless/core.mjs 的 VERSION）与二进制相同；发布时一起改
+#[test]
+fn serverless_version_matches_cargo() {
+    let expected = format!("export const VERSION = '{}';", env!("CARGO_PKG_VERSION"));
+    assert!(include_str!("../serverless/core.mjs").contains(&expected), "update serverless/core.mjs: {expected}");
+}
+
 async fn serve(app: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -56,6 +63,7 @@ async fn local_wrapper_only_never_relays() {
             "serverWrapper": false,
             "amllApi": "https://api.amll.dev",
             "qqEnabled": false,
+            "version": env!("CARGO_PKG_VERSION"),
             "wrapper": { "url": wrapper, "rate": 5, "concurrency": 3 },
             "hint": "Get a token at https://token.test",
         })
@@ -75,7 +83,10 @@ async fn local_wrapper_only_never_relays() {
     // 默认仍转发；host.js 不带本地模式默认值
     let relay = serve(fantastic::router(Arc::new(AppState::with_config(config(wrapper, true))))).await;
     let text = client.get(format!("{relay}/assets/host.js")).send().await.unwrap().text().await.unwrap();
-    assert_eq!(text, "window.FANTASTIC_HOST = {\"amllApi\":\"https://api.amll.dev\",\"hint\":\"Get a token at https://token.test\",\"qqEnabled\":false,\"serverWrapper\":true};\n");
+    assert_eq!(
+        text,
+        format!("window.FANTASTIC_HOST = {{\"amllApi\":\"https://api.amll.dev\",\"hint\":\"Get a token at https://token.test\",\"qqEnabled\":false,\"serverWrapper\":true,\"version\":\"{}\"}};\n", env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(client.get(format!("{relay}/status")).send().await.unwrap().status(), 200);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

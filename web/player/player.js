@@ -190,6 +190,22 @@
   }
 
   /**
+   * 吞掉这次按下之后的 click（在 pointerdown 里调用）：捕获阶段拦下，不再派发给页面。
+   * 按下后拖动滚动（pointercancel）或下一次按下时撤销，以免拦到以后的点击
+   */
+  function swallowClick(win) {
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
+    const done = () => {
+      win.removeEventListener('click', stop, true);
+      win.removeEventListener('pointercancel', done, true);
+      win.removeEventListener('pointerdown', done, true);
+    };
+    win.addEventListener('click', stop, true);
+    win.addEventListener('pointercancel', done, true);
+    win.addEventListener('pointerdown', done, true);
+  }
+
+  /**
    * 播放音质的设置（设置中心「播放」，prefs.mjs 的 playbackFor）：{ quality: efficient / high / lossless / hires, spatial: auto / always / off,
    * transition: off / automix / crossfade（歌曲之间的过渡，见 Mixer）, crossfade（交叉淡化的秒数）}，quality 已按当前网络（Wi-Fi / 移动数据）取好。
    * app.mjs 用 usePlaybackSettings 接上（{ get, set }，set 供待播清单里的 AutoMix 开关修改 transition）；
@@ -1938,6 +1954,12 @@
   const PREROLL_LEAD = 25;
   /** 等下一首准备好最多多久 */
   const PREROLL_TIMEOUT = 20000;
+  /**
+   * <audio> 上过渡增益的下限（−60 dB，听不见）。Android Chrome 会立即暂停后台页面里音量为 0 的媒体元素
+   * （play 之后马上 pause，视为静音的后台播放），AutoMix 从 0 淡入的下一首在后台就停在开头、不再切歌
+   */
+  const ELEMENT_MIX_FLOOR = 0.001;
+  function elementMixGain(gain) { return Math.max(ELEMENT_MIX_FLOOR, gain); }
   /** 混音期间更新音量的间隔（毫秒）；离开始还远时同样用它检查，开销只是几次比较 */
   const MIX_TICK = 40;
   /** 手动下一首（下一首已准备好）时的快速交叉淡化（秒） */
@@ -1946,6 +1968,8 @@
   const RATE_GLIDE = 4000;
 
   let volumeControllable = null;
+  /** updatePcm 用来区分不同的 PCM 引擎实例 */
+  let pcmSerial = 0;
   /** 能否单独调节 <audio> 的音量：iOS Safari 的 volume 只读（始终为 1），这时不做过渡，按无缝衔接播放 */
   function canControlVolume() {
     if (volumeControllable === null) {
@@ -1987,9 +2011,10 @@
     /** 过渡的增益 0–1 */
     setGain(gain) {
       this.gain = gain;
-      const value = this.player.baseGain(this.item, this.mode) * gain;
-      if (this.deck) this.deck.audio.volume = Math.min(1, Math.max(0, value));
+      const base = this.player.baseGain(this.item, this.mode);
+      if (this.deck) this.deck.audio.volume = Math.min(1, Math.max(0, base * elementMixGain(gain)));
       else {
+        const value = base * gain;
         const param = this.engine.gain.gain;
         param.cancelScheduledValues(this.engine.context.currentTime);
         param.setTargetAtTime(value, this.engine.context.currentTime, 0.012);
@@ -2746,7 +2771,7 @@
      */
     applyVolume() {
       const c = this.current;
-      this.audio.volume = Math.min(1, Math.max(0, this.baseGain(c, 'mse') * this.mixGain));
+      this.audio.volume = Math.min(1, Math.max(0, this.baseGain(c, 'mse') * elementMixGain(this.mixGain)));
       if (this.pcm) {
         const param = this.pcm.gain.gain;
         if (param.cancelScheduledValues && this.pcm.context) param.cancelScheduledValues(this.pcm.context.currentTime);
@@ -2771,7 +2796,7 @@
         param.cancelScheduledValues(this.pcm.context.currentTime);
         param.setTargetAtTime(this.volume * gain, this.pcm.context.currentTime, 0.012);
       } else {
-        this.audio.volume = Math.min(1, Math.max(0, this.baseGain(c, 'mse') * gain));
+        this.audio.volume = Math.min(1, Math.max(0, this.baseGain(c, 'mse') * elementMixGain(gain)));
       }
     }
 
@@ -2779,6 +2804,8 @@
       const volume = this.volume;
       const input = this.$('.volume');
       input.value = volume;
+      // 读屏读百分比，不读 0.57
+      input.setAttribute('aria-valuetext', `${Math.round(volume * 100)}%`);
       input.style.setProperty('--volume', `${volume * 100}%`);
       this.$('.player-volume').dataset.level = volume === 0 ? 0 : Math.min(3, Math.ceil(volume * 3));
       const label = t(volume === 0 ? 'player.unmute' : 'player.mute');
@@ -2798,9 +2825,17 @@
       return isPcmMode(this.current.mode) ? (this.pcm && this.pcm.mix) || null : this.audio;
     }
 
+    /**
+     * PCM 引擎每 200 ms 回调一次：进度条每次都更新；播放按钮、音质面板与 onChange 只在状态变化时重画——
+     * 否则打开的音质面板每秒重建 5 次（焦点丢失、点击落空），各页面的曲目行也跟着重写
+     */
     updatePcm() {
-      this.renderToggle();
       this.renderProgress();
+      const pcm = this.pcm;
+      const key = pcm ? [pcm.serial || (pcm.serial = ++pcmSerial), pcm.paused, pcm.seeking, pcm.failed, pcm.gaveUp, pcm.channels, pcm.dataset, this.jocFallback, this.loading, this.current && this.current.mode].join() : '';
+      if (key === this.pcmKey) return;
+      this.pcmKey = key;
+      this.renderToggle();
       this.renderMode();
       this.emit();
     }
@@ -2896,7 +2931,8 @@
         return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
       };
       seek.addEventListener('pointerdown', (e) => {
-        if (!this.duration()) return;
+        // 只响应主键（右键、中键不开始拖动）
+        if (!this.duration() || e.button !== 0) return;
         seek.setPointerCapture(e.pointerId);
         seek.classList.add('dragging');
         this.dragRatio = ratioAt(e);
@@ -2916,8 +2952,14 @@
       seek.addEventListener('pointerup', release);
       seek.addEventListener('pointercancel', release);
       seek.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowLeft') { this.seekBy(-5); e.preventDefault(); }
-        if (e.key === 'ArrowRight') { this.seekBy(5); e.preventDefault(); }
+        // 与原生滑块相同的按键：方向键 ±5 秒，PageUp / PageDown ±30 秒，Home / End 到头尾
+        const d = this.duration();
+        const step = { ArrowLeft: -5, ArrowDown: -5, ArrowRight: 5, ArrowUp: 5, PageDown: -30, PageUp: 30 }[e.key];
+        if (step) this.seekBy(step);
+        else if (e.key === 'Home' && d) this.transport().currentTime = 0;
+        else if (e.key === 'End' && d) this.transport().currentTime = Math.max(0, d - 1);
+        else return;
+        e.preventDefault();
       });
 
       if ('mediaSession' in navigator) {
@@ -2958,7 +3000,11 @@
     bindKeys(doc) {
       // 待播清单面板：按 Esc 或点击面板与播放条以外的地方时收起；音质详情、音量滑块同样点别处收起
       doc.addEventListener('pointerdown', (e) => {
-        if (!this.qualityPanel.hidden && !e.target.closest('.player-mode, .quality-panel')) this.closeQualityPanel();
+        if (!this.qualityPanel.hidden && !e.target.closest('.player-mode, .quality-panel')) {
+          this.closeQualityPanel();
+          // 同歌词选项菜单的遮罩：点别处只收起详情，这次点按不落到下面（如歌词行跳转）
+          swallowClick(doc.defaultView);
+        }
         if (!this.$('.player-volume').contains(e.target)) this.$('.player-volume').classList.remove('expanded');
         // data-queue-keep：全屏播放界面底部的开关（待播清单开关移到了那里，见 lyrics/panel.mjs），点击时不先收起清单
         if (this.queuePanel.hidden || this.queuePanel.contains(e.target) || this.root.contains(e.target)
@@ -4054,9 +4100,12 @@
       const waiting = this.loading && a.paused || (!a.paused && !isPcmMode(this.current?.mode) && a.readyState < 3);
       if (!a.paused) this.loading = false;
       const btn = this.$('.player-toggle');
-      btn.innerHTML = waiting ? ICON_LOADING : (a.paused ? ICON_PLAY : ICON_PAUSE);
-      // 全屏播放界面按它换成 AMLL 的图标（见 app.css）
-      btn.dataset.state = waiting ? 'loading' : (a.paused ? 'play' : 'pause');
+      const state = waiting ? 'loading' : (a.paused ? 'play' : 'pause');
+      // 全屏播放界面按 data-state 换成 AMLL 的图标（见 app.css）；状态没变不重写图标
+      if (btn.dataset.state !== state) {
+        btn.innerHTML = waiting ? ICON_LOADING : (a.paused ? ICON_PLAY : ICON_PAUSE);
+        btn.dataset.state = state;
+      }
       btn.setAttribute('aria-label', t(a.paused ? 'player.play' : 'player.pause'));
     }
 

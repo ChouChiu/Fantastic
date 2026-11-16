@@ -48,8 +48,9 @@
 - 导航底部的设置，保存在 localStorage，不会过期：
   - 主地区：用于搜索（以及之后的功能）。wrapper-lite 账号所在地区排在最前（最佳体验），其次是收藏的地区（默认收藏 US / CN / JP）；其他地区收在「更多地区」里，展开后可筛选，每个地区右侧的星标可收藏 / 取消收藏。默认为 wrapper-lite 的第一个地区。
   - 曲库语言（amp-api 的 `l`，与界面语言相互独立）：默认为各地区的默认语言，可选项只有 `/amp/v1/storefronts` 中该地区的 `supportedLanguageTags`。按地区分别记住，歌词也使用它。
-- 首页显示 wrapper-lite 状态，以及最近搜索的关键词（点击可再次搜索，也可逐条删除）；页面底部有本项目的 GitHub 链接和对所用开源项目的致谢。
+- 首页与 music.apple.com/{cc}/search 的布局相同：顶部是搜索框，下方是最近搜索的关键词（点击可再次搜索，也可逐条删除）与**类别浏览**——与官网搜索页相同的类别砖块（风格、心情与活动、排行榜、音乐视频、专题等；amp-api `recommendations/{cc}?name=search-landing`），使用主地区，标题旁的按钮可切换地区。类别默认只显示第一行（手机上两行），点下方的「展开全部」查看其余类别，展开或收起会被记住。砖块在站内打开策展人、分组、multi-room 与排行榜页，本站无法打开的链接到 Apple Music。搜索时这块换成搜索结果，关闭结果后恢复。页面底部显示当前 Fantastic 版本（点击查看更新日志），以及本仓库的 GitHub、Telegram 群组（https://t.me/apple_music_alac）、反馈问题的链接和对所用开源项目（含上游 am-hook）的致谢。选择 QQ 音源时隐藏类别、示例链接与音质说明。
 - 搜索：首页输入框既能粘贴链接，也能按关键词搜索（与 music.apple.com 相同的 amp-api 请求）。输入时显示补全词与直达结果；结果按最佳结果、艺人、专辑、歌曲、歌单、MV 分组，可「加载更多」。搜索使用主地区，也可在结果旁的按钮里修改。按 `/` 聚焦输入框；搜索词记在地址栏 `?q=` 中，可前进 / 后退与分享。搜索只在首页；其他页面顶部是「返回」按钮，回到上一页（直接打开链接进入时回到首页）。
+- 可以安装为应用（Chrome / Edge：地址栏或浏览器菜单中的安装按钮；Android：添加到主屏幕），在独立窗口中打开；使用 `web/manifest.webmanifest`。
 - 地址栏、页面标题和浏览器前进 / 后退跟随当前页面，链接可以直接分享，刷新后仍停留在当前页。
 - 实现方式：与 music.apple.com 相同，整站是单页应用。服务端对所有页面地址都返回 `app.html`，播放条、音频、解密 Worker 和歌词界面常驻其中；站内链接由前端路由（`app.mjs`）接管，用 `history.pushState` 改地址并切换页面视图（`web/views/`），文档不重新加载。不依赖任何请求头，通过 `http://<局域网 IP>` 访问时同样有效。
 
@@ -72,7 +73,7 @@
 
 | 页面 | 说明 |
 |---|---|
-| `/` | 首页：搜索、wrapper-lite 状态与最近搜索 |
+| `/` | 首页：搜索、最近搜索与类别浏览（与 music.apple.com/{cc}/search 相同） |
 | `/https://music.apple.com/<cc>/song/<slug>/<id>` | 歌曲页（见[歌曲](#歌曲)） |
 | `/https://music.apple.com/<cc>/music-video/<slug>/<id>` | MV 页（见 [MV](#mv)） |
 | `/https://music.apple.com/<cc>/post/<id>` | 艺人上传的视频（MV 页） |
@@ -121,7 +122,7 @@
 ## 广播与电台
 
 - **广播**（`/radio`，侧边栏与手机菜单中「排行榜」与「设置」之间）：与 music.apple.com/{cc}/radio 相同的编辑区块（amp-api `editorial/{cc}/groupings?name=radio`），使用主地区；直播电台货架显示品牌图标、「直播」标记与正在播出的节目。填过 media-user-token 时最上面另有「你的电台」：个人电台（`stations?filter[identity]=personal`）与最近播放的电台（`me/recent/radio-stations`）。新发现、编辑页与广播中的电台链接都在站内打开电台页。
-- **media-user-token**：wrapper-lite 还没有电台接口，电台用你 Apple Music 账号的 media-user-token 直接请求 Apple。第一次打开电台页时会请你填写（登录 music.apple.com 后在开发者工具 → Application → Cookies 里复制 `media-user-token`，粘贴整段 Cookie 也可以），先经 `/v1/me/storefront` 检验再保存。token 只保存在本浏览器的 localStorage，请求时经 `X-Media-User-Token` 交给服务端转发，服务端不保存、不缓存、不记录。被 Apple 拒绝时会再次提示；设置中心可以修改或清除。
+- **media-user-token**：wrapper-lite 还没有电台接口，电台用你 Apple Music 账号的 media-user-token 直接请求 Apple。第一次打开电台页时会请你填写（登录 music.apple.com 后在开发者工具 → Application → Cookies 里复制 `media-user-token`，粘贴整段 Cookie 也可以），经 `POST /station/token` 存进本站的 HttpOnly cookie（页面脚本读不到），再经 `/v1/me/storefront` 检验，检验不通过时清除。之后浏览器在电台请求中自动带上 cookie，服务端只把 token 转发给 Apple，不保存、不缓存、不记录。页面本身只记下「已填写」与 token 的末尾 6 位。被 Apple 拒绝时会再次提示；设置中心可以修改或清除。
 - **电台页**（`/https://music.apple.com/<cc>/station/<slug>/ra.<id>`）按电台的 `playParams` 分三类（与 MusicKit 的判断相同）：
   - 个人电台与编辑电台（`format: tracks`，如风格电台、个人电台 `ra.u-…`）：与歌单页相同的头部与曲目列表，内容是电台「接下来的几首」（`POST /v1/me/stations/next-tracks/<id>`，每次 10 首），可以换一批或加载更多；播放到队尾前自动续取下一批，像电台一样一直播下去。曲目的「更多」菜单与歌曲相同（含下载），头部的「更多」可以下载列出的歌曲。
   - 广播单集（`format: stream`，`streamingRadioSubType: Episode`，音频或视频）：与 MV 页相同的布局，列出 HLS 的各码率与轨道，可以播放、跳转和下载（音频为 `.m4a`，视频为 `.mp4`，带标题、节目、播出日期与封面标签）。
@@ -174,12 +175,18 @@
   - 文件名模板：专辑 / 歌单文件夹（ZIP 名）、专辑曲目、歌单曲目、单曲；`/` 表示子文件夹，`{tracknum:02d}` 补零，变量有 `{title}` `{artist}` `{album}` `{album_artist}` `{composer}` `{genre}` `{tracknum}` `{tracktotal}` `{disk}` `{disktotal}` `{year}` `{release_date}` `{codec}` `{quality}` `{bit_depth}` `{sample_rate}` `{sample_rate_kHz}` `{explicit}` `{song_id}` `{album_id}` `{artist_id}` `{isrc}` `{upc}` `{record_label}` `{copyright}` `{playlist}` `{playlist_id}` `{curator}` `{index}`，编辑时实时预览；变量值里的 `/` 等非法字符替换为 `_`
   - 标签：可选写入的字段（标题、艺人、专辑、专辑艺人、作曲、流派、发行日期、曲目号、碟号、歌词、封面、版权、厂牌、UPC、ISRC、分级、歌曲 / 专辑 / 艺人 ID），排序字段，歌单曲目使用原专辑信息或歌单信息，去掉专辑名末尾的「 - EP」/「 - Single」（标签与文件名、文件夹名一致，默认关闭），元数据语言
   - 封面：JPEG / PNG 与尺寸，嵌入的封面和另存的 `cover.jpg` / `cover.png` 分开设置
+  - 动态封面：下载专辑、歌单时是否另存动态封面（`square_animated_artwork.mp4`，有 3:4 竖版时另存 `tall_animated_artwork.mp4`，与参考实现的 `save-animated-artwork` 同名；默认关闭，下载对话框中每种形状各有一个勾选框）、编码（HEVC 最高 2160p，或兼容旧播放器的 H.264，最高 1080p）与最高分辨率（按短边）
   - 歌词：另存 `.lrc` / `.ttml`、逐字（增强型 LRC）、附带翻译 / 发音、歌词语言
 - **下载**：专辑页与歌单页的下载按钮（播放、随机播放旁）打开对话框，可临时改音质并选择曲目（默认全部歌曲，以及设置中没有关闭时的 MV；未发行的曲目不能选择）；各处的「更多」菜单（曲目行、搜索结果、货架等）中的歌曲、MV、专辑与歌单也可直接下载；歌曲页各音质的「下载解密文件」同样经下载管理器（`web/download/downloads.mjs`）进行，带标签。
   - 每首歌在浏览器内解密后，`media.wasm` 在整理为标准 MP4 时把 iTunes 标签（`moov.udta.meta.ilst`，字段同 go-mp4tag）连同封面、歌词一起写入 `moov`，不需要第二次改写文件；封面与歌词与音频同时获取，取不到时只是不写入
   - 元数据来自 amp-api `songs?ids=…&include=albums,artists` 与 `music-videos?ids=…`（每 100 首一次请求）：作曲、ISRC、曲目号 / 碟号，以及所属专辑的 UPC、版权、厂牌与曲目数
   - MV 的下载同参考实现的 `mvDownloader`：从 wrapper-lite 取 MV master，按设置选视频与音轨，由 MV 引擎解密、合并并整理为 `.mp4`，文件名使用同样的模板（`{codec}` / `{quality}` 为视频与音频规格，如 `2160p HEVC Dolby Vision · Dolby Atmos`）。标签同参考实现的 `writeMVMP4Tags`（专辑信息取自专辑或歌单，另写 `PERFORMER`、`RELEASETIME`，封面为 MV 缩略图），媒体类型为音乐视频（`stik` 6）。需要 OPFS
   - ZIP 不复制数据：由 OPFS 中的各个文件与头部拼成一个 Blob，CRC-32 在 defrag 写出时顺带计算
+- **保存封面**（`web/views/artwork-menu.mjs`）：在任何页面的封面上（专辑 / 歌单头部、卡片、搜索结果、播放条、艺人头图）按右键，或在触屏上长按，弹出菜单：
+  - 保存封面：原图（原始格式，或指定 JPG / PNG），或 3000 / 1500 / 600 px 的 JPG
+  - 保存动态封面（方形 / 竖版 3:4 / 艺人页的横版，页面有时才列出）：列出 HLS master 中的各档清晰度，HEVC 在前，附码率与估算大小。动态封面是 Apple CDN 上无加密的 fMP4 HLS，取所选变体的全部分片后由 `media.wasm` 改写为普通 MP4（`moov` 在前，时间戳从 0 开始）。部分竖版带静音音轨（-91 dB），只保留视频
+  - 在新标签页中打开原图、复制原图地址
+  - 文件与其他下载一样经下载中心保存。按住 Shift 右键保留浏览器自己的菜单
 - **下载中心**（`web/download/center.mjs`）：与播放条一样常驻在页面底部（播放条上方），站内跳转时下载不中断；显示总进度、速度与当前任务，展开后列出各专辑 / 歌单 / 单曲及每首歌的状态，可以取消、重试（整个任务或单首）、有失败曲目时仍然保存已完成的部分、再次保存、移除。移除或关闭标签页时删除临时文件；下载进行中关闭标签页会提示。
 - **ALAC 检测**：专辑页、歌单页与歌曲页头部的波形按钮，以及歌曲「更多」菜单里的「检测 ALAC」，逐首检测最高音质的 ALAC（`web/alac-check.mjs`，对话框见 `views/alac-check-dialog.mjs`），不请求 `/key`。打开后不自动开始，可全选、全不选或勾选部分曲目；显示地区、专辑 / 歌单 / 歌曲 ID、每首的歌曲 ID 与检测时间，可复制文字报告。
   - **网页版与 wrapper-lite 的 master**：默认只用 amp-api 的 `extendedAssetUrls.enhancedHls`，不经过 wrapper-lite。两者可能是不同的打包，wrapper-lite 给出的有时音质更高（如歌曲 `1679278167`：网页版只有 24-bit / 48 kHz，wrapper-lite 的另有 24-bit / 96 kHz），勾选后同时检测 wrapper-lite 的 master；两边最高音质 ALAC 的 media m3u8 相同时只检测一次，不同时分别列出并标明哪边音质更高。歌曲页的音质列表（来自 wrapper-lite）也会取网页版的 master 比较，只在 wrapper-lite 中有的音质标为「仅 wrapper-lite」

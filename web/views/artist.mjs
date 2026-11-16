@@ -1,7 +1,8 @@
 import { trackKey } from '../sources/track.mjs';
 // 艺人页（/https://music.apple.com/{cc}/artist/{slug}/{id}），由 app.mjs 挂载
-import { createActions, targetOf } from './actions.mjs';
-import { ampFetch } from '../amp-fetch.mjs';
+import { createActions, setPlayButton, targetOf } from './actions.mjs';
+import { amp, artUrl } from '../amp.mjs';
+import { motionSources } from '../download/motion.mjs';
 
 const { formatTime } = window.AmHook;
 const { AmDecrypt, AmI18n } = window;
@@ -73,25 +74,6 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
     'omit[resource]': 'autos',
     views: 'appears-on-albums,compilation-albums,featured-albums,featured-on-albums,featured-release,full-albums,latest-release,live-albums,more-to-see,playlists,similar-artists,singles,music-videos,top-songs',
   };
-
-  async function amp(path, params) {
-    const url = new URL('/amp' + path, location.origin);
-    // 值为 undefined 的参数不传（如地区不支持当前语言时的 l）
-    for (const [key, value] of Object.entries(params || {})) if (value !== undefined) url.searchParams.set(key, value);
-    let res = await ampFetch(url);
-    if (res.status === 400 && url.searchParams.has('l')) {
-      url.searchParams.delete('l');
-      res = await ampFetch(url);
-    }
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);
-    return data;
-  }
-
-  /** artwork.url 模板：{w}x{h}{c}.{f}；crop 为官网使用的裁切码（通栏图 ea / vf 等） */
-  function artUrl(artwork, w, h = w, crop = 'bb', format = 'jpg') {
-    return artwork && artwork.url ? artwork.url.replace('{w}', w).replace('{h}', h).replace('{c}', crop).replace('{f}', format) : '';
-  }
 
   /** 目录资源的 url → 本站页面路径；识别不了时按类型与 ID 拼出 */
   function pagePath(resource) {
@@ -221,6 +203,11 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
     else document.body.style.removeProperty('--joe');
 
     const media = $('hero-art');
+    // 封面菜单（artwork-menu.mjs）：横版与方形动态头像都可保存，文件名用艺人名
+    const motions = motionSources(a.editorialVideo);
+    if (motions.length) media.dataset.motion = JSON.stringify(motions.map(({ kind, src }) => ({ kind, src })));
+    else delete media.dataset.motion;
+    media.dataset.artworkName = a.name || '';
     if (style.kind === 'wide' || style.kind === 'video') {
       // 通栏：wide 与官网 uberArtwork 的 artwork profile 相同，按 16:9 取图（[[1200], HD_ASPECT_RATIO, cropStyle]），
       // vf 等裁切码由图片服务器按这个比例做智能裁切——hero 原图多为 3000×3000 方图，按原图比例取会拿到整张方图，
@@ -234,6 +221,7 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
       media.replaceChildren();
       // 圆形头像（官网 facehole-uber），背后是同一张图放大、模糊的光晕
       setImg($('portrait'), 'portrait-img', artUrl(style.art, 380), t('artist.portraitAlt', { name: a.name }));
+      $('portrait').dataset.artworkName = a.name || '';
       setImg($('portrait-glow'), 'glow-img', artUrl(style.art, 240));
     }
     const key = style.kind === 'video' ? style.src : '';
@@ -280,6 +268,7 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
       const src = artUrl(a.artwork, 80);
       const playBtn = el('button', { className: 'track-play', type: 'button', innerHTML: ICON.play });
       playBtn.setAttribute('aria-label', t('album.playTrack', { name: a.name }));
+      playBtn.dataset.name = a.name;
       playBtn.addEventListener('click', () => playTrack(track));
       const cover = el('span', { className: 'track-art' },
         src ? el('img', { src, alt: '', loading: 'lazy', decoding: 'async' }) : el('span', { className: 'ph' }),
@@ -463,7 +452,7 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
       row.classList.toggle('playing', active);
       row.classList.toggle('paused', active && !playing);
       row.classList.toggle('loading', player.pendingKey === trackKey({ id: id }));
-      if (playBtn) playBtn.innerHTML = active && playing ? ICON.pause : ICON.play;
+      if (playBtn) setPlayButton(playBtn, active && playing, ICON.play, ICON.pause);
     }
   }
   player.onChange(syncRows);

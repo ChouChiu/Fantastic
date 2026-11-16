@@ -29,14 +29,14 @@ Fantastic 是一个用 Rust 编写的音乐网页播放器，把 **Apple Music**
 - 由 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 渲染的逐字歌词与全屏播放界面，支持翻译与音译。
 - 浏览器内的杜比全景声对象渲染（JOC），输出到立体声扬声器或双耳耳机。
 - 本地资料库：资料库、歌单、喜爱与文件夹保存在浏览器 IndexedDB，可导入 / 导出。
-- 界面支持简体中文、繁體中文与 English；单个二进制部署，或一键部署到 Vercel / Cloudflare。
+- 界面支持简体中文、繁體中文与 English；可安装为应用（PWA）；单个二进制部署，或一键部署到 Vercel / Cloudflare。
 
 **Apple Music**
 
 - 全部音质：无损 ALAC（最高 24-bit / 192 kHz）、杜比全景声、AAC / HE-AAC / 双耳 / 缩混，以及最高 4K 杜比视界的 MV。
 - **浏览器内解密**：服务端只与 wrapper-lite 通信，媒体由浏览器直连 Apple CDN，在 Web Worker 中用 WebAssembly 解密。
 - 搜索、新发现、排行榜、广播与电台，专辑 / 歌单 / 艺人 / 编辑页；AutoMix 过渡。
-- 批量下载（iTunes 标签、封面、歌词，ZIP / 文件夹 / 逐个文件，文件名模板）与 ALAC 缺陷检测。
+- 批量下载（iTunes 标签、封面、歌词，ZIP / 文件夹 / 逐个文件，文件名模板），动态封面可随专辑 / 歌单保存，任何封面都能右键或长按单独保存；ALAC 缺陷检测。
 
 **QQ 音乐**
 

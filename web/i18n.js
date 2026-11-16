@@ -196,7 +196,7 @@
       'station.noLicense': 'license 服务器没有返回 license',
       'station.licenseStatus': 'license 服务器返回错误 {status}',
       'station.tokenTitle': '填写 media-user-token',
-      'station.tokenHelp': '电台需要 Apple Music 账号的 media-user-token（wrapper-lite 暂不支持电台）。\n在浏览器中登录 music.apple.com，打开开发者工具 → 应用（Application）→ Cookie → https://music.apple.com，复制 media-user-token 的值粘贴到下面。\ntoken 只保存在本浏览器中，请求时经本站服务端转发给 Apple，服务端不保存。',
+      'station.tokenHelp': '电台需要 Apple Music 账号的 media-user-token（wrapper-lite 暂不支持电台）。\n在浏览器中登录 music.apple.com，打开开发者工具 → 应用（Application）→ Cookie → https://music.apple.com，复制 media-user-token 的值粘贴到下面。\ntoken 保存在本站的 HttpOnly cookie 里（页面脚本读不到），请求时经本站服务端转发给 Apple，服务端不保存。',
       'station.tokenPlaceholder': '粘贴 media-user-token（也可以粘贴整段 Cookie）',
       'station.tokenSave': '保存',
       'station.tokenClear': '清除',
@@ -256,12 +256,15 @@
       'wrapper.badNumber': '上限须为不小于 0 的整数',
       'wrapper.noUrl': '没有填写本地 wrapper-lite 的地址',
       'wrapper.unreachable': '无法连接 {url}（未运行、地址有误或不允许跨源请求）',
+      'wrapper.lnaPrompt': '需要允许本页访问本地网络：在 wrapper-lite 面板里点「保存并检测」，再在浏览器的提示中允许',
+      'wrapper.lnaDenied': '浏览器禁止了本页访问本地网络：在网站设置中允许「本地网络」后重试',
       'wrapper.invalid': 'wrapper-lite 返回的不是 JSON',
       'wrapper.noMaster': 'wrapper-lite 没有返回 m3u8 地址',
 
       'status.checking': '检查中…',
       'status.online': '在线',
       'status.down': '不可用',
+      'status.permission': '需要授权',
       'status.region': '{count} 个地区',
       'status.regions': '{count} 个地区',
       'status.more': '另外 {count} 个地区',
@@ -270,8 +273,14 @@
       'status.current': '当前主地区',
       'footer.tagline': 'Fantastic · 浏览器端解密',
       'footer.note': '仅供个人学习使用',
-      'footer.github': '在 GitHub 上查看',
-      'footer.thanks': '致谢以下开源项目：',
+      'footer.github': 'GitHub',
+      'footer.thanks': '致谢',
+      'footer.about': '在浏览器里解密、播放与下载 Apple Music，支持无损、杜比全景声与 MV。',
+      'footer.links': '项目链接',
+      'footer.telegram': 'Telegram 群组',
+      'footer.issues': '反馈问题',
+      'footer.release': '查看 v{v} 的发布说明',
+      'footer.disclaimer': '仅供个人学习与研究使用。Apple Music 是 Apple Inc. 的商标，本项目与 Apple 无关。',
       'nav.home': '主页',
       'nav.new': '新发现',
       'nav.charts': '排行榜',
@@ -305,6 +314,12 @@
       'home.recent': '最近搜索',
       'home.removeRecent': '删除“{term}”',
       'home.clear': '清空',
+      'home.categories': '类别浏览',
+      'home.categoriesFailed': '类别加载失败：{msg}',
+      'home.retry': '重试',
+      'home.showAll': '展开全部 {n} 个类别',
+      'home.showLess': '收起',
+      'home.formats': '支持的格式',
       'home.invalid': '无法识别：请输入歌曲、MV 或专辑链接。',
       'home.detectSong': '歌曲',
       'home.detectMv': 'MV',
@@ -331,6 +346,7 @@
       'album.hours': '{h} 小时 {m} 分钟',
       'album.popular': '热门',
       'album.playTrack': '播放 {name}',
+      'album.pauseTrack': '暂停 {name}',
       'album.quality': '音质与下载',
       'album.video': '音乐视频',
       'album.trackFailed': '无法播放《{name}》：{msg}',
@@ -979,6 +995,38 @@
       "dlc.mode.zip": "ZIP",
       "dlc.mode.folder": "文件夹",
       "dlc.mode.files": "逐个文件",
+      "dlc.kind.artwork": "封面",
+      "dlc.motion": "动态封面",
+      "dlc.motion.square": "动态封面（方形）",
+      "dlc.motion.tall": "动态封面（竖版 3:4）",
+      "dlc.motion.wide": "动态封面（横版）",
+      "action.loading": "正在载入…",
+      "action.loadFailed": "载入失败：{msg}",
+      "art.cover": "封面",
+      "art.motion": "动态封面",
+      "art.saveCover": "保存封面",
+      "art.saveCoverHint": "选择尺寸与格式",
+      "art.saveMotion": "保存动态封面",
+      "art.saveMotion.square": "保存动态封面（方形）",
+      "art.saveMotion.tall": "保存动态封面（竖版 3:4）",
+      "art.saveMotion.wide": "保存动态封面（横版）",
+      "art.saveMotionHint": "选择清晰度，保存为无声 MP4",
+      "art.original": "原图",
+      "art.originalHint": "原始尺寸与格式，画质最高",
+      "art.pngHint": "无损，文件较大",
+      "art.avcHint": "兼容性更好",
+      "art.openOriginal": "在新标签页中打开原图",
+      "art.copyUrl": "复制原图地址",
+      "set.motion": "下载专辑、歌单时另存动态封面",
+      "set.motionDesc": "有动态封面时另存为 square_animated_artwork.mp4（无声 MP4，与参考实现同名），下载对话框中默认勾选。任何页面的封面都可以右键或长按单独保存静态或动态封面",
+      "set.motionTall": "同时保存竖版动态封面",
+      "set.motionTallDesc": "有 3:4 竖版（手机上显示的那种）时另存为 tall_animated_artwork.mp4",
+      "set.motionCodec": "动态封面编码",
+      "set.motionCodecDesc": "HEVC 最高 2160p、体积更小；H.264 最高 1080p，旧设备与播放器也能播放。没有所选编码时用另一种",
+      "set.motionCodec.hevc": "HEVC（H.265）",
+      "set.motionCodec.avc": "H.264",
+      "set.motionMax": "动态封面最高分辨率",
+      "set.motionMaxDesc": "按短边计（竖版 2048×2732 算 2048），选不超过它的最高一档；都更高时用最低的一个",
       "dlc.preparing": "正在获取曲目信息…",
       "dlc.packing": "正在保存…",
       "dlc.queued": "排队中",
@@ -2725,7 +2773,7 @@
       'station.noLicense': 'The license server returned no license',
       'station.licenseStatus': 'The license server returned error {status}',
       'station.tokenTitle': 'Enter media-user-token',
-      'station.tokenHelp': 'Stations need the media-user-token of an Apple Music account (wrapper-lite does not support stations yet).\nSign in at music.apple.com, open the developer tools → Application → Cookies → https://music.apple.com, and paste the value of media-user-token below.\nThe token is kept only in this browser and is relayed to Apple through this site\'s server, which does not store it.',
+      'station.tokenHelp': 'Stations need the media-user-token of an Apple Music account (wrapper-lite does not support stations yet).\nSign in at music.apple.com, open the developer tools → Application → Cookies → https://music.apple.com, and paste the value of media-user-token below.\nThe token is kept in an HttpOnly cookie for this site (page scripts cannot read it) and is relayed to Apple through this site\'s server, which does not store it.',
       'station.tokenPlaceholder': 'Paste media-user-token (a whole Cookie header also works)',
       'station.tokenSave': 'Save',
       'station.tokenClear': 'Clear',
@@ -2785,12 +2833,15 @@
       'wrapper.badNumber': 'Limits must be whole numbers, 0 or more',
       'wrapper.noUrl': 'No local wrapper-lite URL set',
       'wrapper.unreachable': 'Could not reach {url} (not running, wrong URL, or cross-origin requests not allowed)',
+      'wrapper.lnaPrompt': 'This page needs permission to access your local network: click "Save and check" in the wrapper-lite panel, then allow it in the browser prompt',
+      'wrapper.lnaDenied': 'The browser blocked local network access for this page: allow "Local network" in the site settings and try again',
       'wrapper.invalid': 'wrapper-lite did not return JSON',
       'wrapper.noMaster': 'wrapper-lite returned no m3u8 URL',
 
       'status.checking': 'Checking…',
       'status.online': 'Online',
       'status.down': 'Unavailable',
+      'status.permission': 'Needs permission',
       'status.region': '{count} region',
       'status.regions': '{count} regions',
       'status.more': '{count} more regions',
@@ -2799,8 +2850,14 @@
       'status.current': 'Current storefront',
       'footer.tagline': 'Fantastic · in-browser decryption',
       'footer.note': 'For personal study only',
-      'footer.github': 'View on GitHub',
-      'footer.thanks': 'Thanks to these open-source projects:',
+      'footer.github': 'GitHub',
+      'footer.thanks': 'Built with',
+      'footer.about': 'Play and download Apple Music in your browser — lossless, Dolby Atmos and music videos, decrypted locally.',
+      'footer.links': 'Project links',
+      'footer.telegram': 'Telegram group',
+      'footer.issues': 'Report an issue',
+      'footer.release': 'Release notes for v{v}',
+      'footer.disclaimer': 'For personal study and research only. Apple Music is a trademark of Apple Inc.; this project is not affiliated with Apple.',
       'nav.home': 'Home',
       'nav.new': 'New',
       'nav.charts': 'Top Charts',
@@ -2834,6 +2891,12 @@
       'home.recent': 'Recent Searches',
       'home.removeRecent': 'Remove “{term}”',
       'home.clear': 'Clear',
+      'home.categories': 'Browse Categories',
+      'home.categoriesFailed': 'Couldn’t load categories: {msg}',
+      'home.retry': 'Retry',
+      'home.showAll': 'Show all {n} categories',
+      'home.showLess': 'Show less',
+      'home.formats': 'Supported Formats',
       'home.invalid': 'Unrecognized input: enter a song, music-video or album link.',
       'home.detectSong': 'Song',
       'home.detectMv': 'MV',
@@ -2860,6 +2923,7 @@
       'album.hours': '{h} hr {m} min',
       'album.popular': 'Popular',
       'album.playTrack': 'Play {name}',
+      'album.pauseTrack': 'Pause {name}',
       'album.quality': 'Qualities & download',
       'album.video': 'Music video',
       'album.trackFailed': 'Cannot play “{name}”: {msg}',
@@ -3508,6 +3572,38 @@
       "dlc.mode.zip": "ZIP",
       "dlc.mode.folder": "Folder",
       "dlc.mode.files": "Files",
+      "dlc.kind.artwork": "Artwork",
+      "dlc.motion": "Motion artwork",
+      "dlc.motion.square": "Motion artwork (square)",
+      "dlc.motion.tall": "Motion artwork (tall 3:4)",
+      "dlc.motion.wide": "Motion artwork (wide)",
+      "action.loading": "Loading…",
+      "action.loadFailed": "Couldn’t load: {msg}",
+      "art.cover": "Cover art",
+      "art.motion": "Motion artwork",
+      "art.saveCover": "Save cover art",
+      "art.saveCoverHint": "Choose size and format",
+      "art.saveMotion": "Save motion artwork",
+      "art.saveMotion.square": "Save motion artwork (square)",
+      "art.saveMotion.tall": "Save motion artwork (tall 3:4)",
+      "art.saveMotion.wide": "Save motion artwork (wide)",
+      "art.saveMotionHint": "Choose a quality; saved as a silent MP4",
+      "art.original": "Original",
+      "art.originalHint": "Original size and format, best quality",
+      "art.pngHint": "Lossless, larger file",
+      "art.avcHint": "Plays almost everywhere",
+      "art.openOriginal": "Open original in new tab",
+      "art.copyUrl": "Copy original image address",
+      "set.motion": "Save motion artwork with albums and playlists",
+      "set.motionDesc": "When there is motion artwork, also save square_animated_artwork.mp4 (a silent MP4, named as in the reference downloader); checked by default in the download dialog. Right-click or long-press any cover on any page to save its still or motion artwork on its own",
+      "set.motionTall": "Also save the tall motion artwork",
+      "set.motionTallDesc": "When there is a 3:4 version (the one shown on phones), also save tall_animated_artwork.mp4",
+      "set.motionCodec": "Motion artwork codec",
+      "set.motionCodecDesc": "HEVC goes up to 2160p in smaller files; H.264 tops out at 1080p but plays on older devices and players. The other codec is used when the chosen one is missing",
+      "set.motionCodec.hevc": "HEVC (H.265)",
+      "set.motionCodec.avc": "H.264",
+      "set.motionMax": "Maximum motion artwork resolution",
+      "set.motionMaxDesc": "Measured on the short side (a 2048×2732 tall video counts as 2048): the highest variant at or below it, or the lowest one when all are larger",
       "dlc.preparing": "Fetching track info…",
       "dlc.packing": "Saving…",
       "dlc.queued": "Queued",
@@ -3878,11 +3974,11 @@
   const STOREFRONTS_TTL = 30 * 24 * 3600 * 1000;
   let storefrontsPromise = null;
 
-  async function fetchStorefronts() {
+  async function fetchStorefronts(priority) {
     const map = {};
     // 跟随分页 next（如 /v1/storefronts?offset=25），经 /amp 代理
     for (let path = '/v1/storefronts', page = 0; path && page < 20; page++) {
-      const res = await (globalThis.ampFetch || fetch)('/amp' + path);
+      const res = await (globalThis.ampFetch || fetch)('/amp' + path, priority ? { priority } : undefined);
       if (!res.ok) throw new Error(`storefronts ${res.status}`);
       const data = await res.json();
       for (const item of (data && data.data) || []) {
@@ -3901,8 +3997,9 @@
     return map;
   }
 
-  function refreshStorefronts() {
-    return fetchStorefronts().then((map) => {
+  /** priority：缓存过期的后台刷新为 low，不与首屏请求竞争 */
+  function refreshStorefronts(priority) {
+    return fetchStorefronts(priority).then((map) => {
       try { localStorage.setItem(STOREFRONTS_KEY, JSON.stringify({ at: Date.now(), map })); } catch {}
       return map;
     });
@@ -3914,7 +4011,7 @@
       if (cached && cached.map && Object.keys(cached.map).length) {
         storefrontsPromise = Promise.resolve(cached.map);
         if (!(Date.now() - cached.at < STOREFRONTS_TTL)) {
-          refreshStorefronts().then((map) => { storefrontsPromise = Promise.resolve(map); }, () => {});
+          refreshStorefronts('low').then((map) => { storefrontsPromise = Promise.resolve(map); }, () => {});
         }
       } else {
         // 失败不缓存，下次调用重试

@@ -29,14 +29,14 @@ Live demo: <https://music.1412.tech>
 - Word-by-word lyrics and a full-screen player rendered by [AMLL](https://github.com/amll-dev/applemusic-like-lyrics), with translation and romanization.
 - In-browser Dolby Atmos object rendering (JOC) to stereo speakers or binaural headphones.
 - Local library: library, playlists, favorites and folders in the browser's IndexedDB, with import / export.
-- UI in Simplified Chinese, Traditional Chinese and English; deploy as a single binary or with one click to Vercel / Cloudflare.
+- UI in Simplified Chinese, Traditional Chinese and English; installable as an app (PWA); deploy as a single binary or with one click to Vercel / Cloudflare.
 
 **Apple Music**
 
 - Every quality: lossless ALAC (up to 24-bit / 192 kHz), Dolby Atmos, AAC / HE-AAC / binaural / downmix, and music videos up to 4K Dolby Vision.
 - **Decrypted in the browser**: the server only talks to wrapper-lite; media comes straight from Apple's CDN and is decrypted with WebAssembly in Web Workers.
 - Search, New, Top Charts, Radio and stations, album / playlist / artist / editorial pages; AutoMix transitions.
-- Batch downloads (iTunes tags, cover art, lyrics; ZIP / folder / files; name templates) and the ALAC defect check.
+- Batch downloads (iTunes tags, cover art, lyrics; ZIP / folder / files; name templates), motion artwork with albums / playlists, a save-artwork menu on every cover, and the ALAC defect check.
 
 **QQ Music**
 

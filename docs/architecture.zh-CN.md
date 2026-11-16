@@ -75,9 +75,11 @@ box 处理：FairPlay 元数据 box（`sinf`、`senc`、`saiz`、`saio`、`pssh`
 | AutoMix 与交叉淡化 | `player/automix.js`（规划）、`player/player.js` 的 `Mixer` / `Voice` | — |
 | MV | `mv/`（播放列表、引擎、字幕）、`views/mv.mjs`、`media/` | `src/handlers.rs`（`/parse/mv*`、`/mv/*`）、`crates/am-media`（PlayReady、CENC/CBCS、合并、defrag、字幕） |
 | 广播与电台 | `station.mjs`（token、许可证）、`mv/radio.mjs`（HLS）、`views/station.mjs`、`views/browse.mjs`（广播页） | `src/amp.rs`（`station_*`）、`serverless/core.mjs` |
-| 曲库页面与搜索 | `views/*.mjs`、`views/actions.mjs`（封面按钮、「更多」菜单）、`i18n.js`（地区、语言） | `src/amp.rs`（token、HTTP/2、缓存）、`serverless/core.mjs` |
+| 曲库页面与搜索 | `views/*.mjs`、`views/actions.mjs`（封面按钮、「更多」菜单）、`amp.mjs`（`/amp` 请求、封面地址）、`views/links.mjs`（链接 → 本站页面）、`i18n.js`（地区、语言） | `src/amp.rs`（token、HTTP/2、缓存）、`serverless/core.mjs` |
+| 首页：搜索与类别浏览 | `views/home.mjs`（输入框、建议、最近搜索）、`views/search-results.mjs`（结果区）、`views/categories.mjs`（类别砖块） | `src/amp.rs`（`/amp/v1/catalog`、`recommendations_handler`）、`serverless/core.mjs` |
 | 歌词 | `lyrics/`（`panel.mjs` 接入播放器；`ttml.mjs`、`fonts.mjs`、`backdrop*.mjs`、`pulse.mjs`） | `src/handlers.rs`（`/lyrics`） |
 | 下载 | `download/`（管理器、下载中心、标签、ZIP、文件名）、`views/download-dialog.mjs`、`media/`（defrag） | — |
+| 动态封面下载与封面菜单 | `download/motion.mjs`（变体、选清晰度、分片 → 普通 MP4）、`views/artwork-menu.mjs`（各页面封面的右键 / 长按菜单）、`motion-art.mjs`（播放、播放列表解析） | — |
 | 资料库与歌单 | `library.mjs`（IndexedDB）、`views/library*.mjs` | —（只在浏览器） |
 | 设置 | `prefs.mjs`（存储）、`views/settings*.mjs`（页面）、`pickers.mjs`（导航选择面板） | — |
 | wrapper-lite 模式与限流 | `wrapper.js`、`pickers.mjs`、`host.js` | `src/wrapper.rs`、`src/limit.rs`、`src/handlers.rs`（`require_relay`） |
@@ -91,7 +93,8 @@ src/                   Rust 服务端（二进制）
   cli.rs               命令行参数
   lib.rs               路由：资源路由、经限流的 wrapper-lite 转发、amp-api 与电台接口、页面 fallback
   state.rs             配置与共享客户端（AppState）
-  assets.rs            内嵌前端：资源表（web/<路径> = /assets/<路径>）、内容哈希地址、ETag
+  assets.rs            内嵌前端：资源表（web/<路径> = /assets/<路径>）、内容哈希地址、ETag、br / gzip 压缩
+  security.rs          所有响应的安全响应头（CSP、nosniff、禁止嵌入）
   handlers.rs          页面外壳与 Apple Music 页面路径的 fallback、host.js、wrapper-lite 转发
                        （状态、歌曲 master、密钥、歌词、MV master / webplayback / license）
   wrapper.rs           wrapper-lite 客户端：限速限并发、Authorization、排队统计
@@ -111,6 +114,7 @@ web/                   浏览器应用：内嵌进二进制，地址为 /assets/
   wrapper.js           wrapper-lite 客户端：服务端转发或浏览器直连本地 wrapper-lite、解析 master、429 退避（AmWrapper）
   library.mjs          资料库与歌单存储（IndexedDB、跨标签页同步、导入导出格式与校验）
   station.mjs          需要 media-user-token 的电台接口；许可证请求格式
+  amp.mjs              /amp 代理的公共请求（amp()：去掉不支持的 l、5xx 重试）与封面地址模板（artUrl）
   motion-art.mjs       专辑、歌单与艺人页的动态封面（editorialVideo 的 HLS，MSE 播放）
   alac-check.mjs       ALAC 检测：原样帧末尾缺陷、打包日期、实际位深与频宽
   player/              player.js：播放引擎（MSE、FLAC、EC-3 PCM、JOC）、混音、队列与播放条（AmPlayer）；
@@ -122,10 +126,12 @@ web/                   浏览器应用：内嵌进二进制，地址为 /assets/
   ec3/                 EC-3 PCM 回退：解码 Worker、runtime 与 ec3.wasm（@mediabunny/ac3，见 SOURCE.md）
   joc/                 全景声对象（JOC）：解码 Worker、joc.wasm、AudioWorklet 输出端、声场界面、hrtf/（SADIE II）
   mv/                  MV 播放列表与选轨（hls.mjs）、播放与下载（engine.mjs）、CEA-608 字幕、电台 HLS（radio.mjs）、样式
-  download/            批量下载：管理器（downloads.mjs）、下载中心（center.mjs）、iTunes 标签、ZIP、文件名
+  download/            批量下载：管理器（downloads.mjs）、下载中心（center.mjs）、iTunes 标签、ZIP、文件名、动态封面（motion.mjs）
   lyrics/              歌词界面：panel.mjs（接入播放器）、TTML 解析、LRC 导出、AMLL 打包、封面动态背景、节拍律动、字体库与字体目录
   views/               页面视图：<name>.html + <name>.mjs（+ <name>.css），由 app.mjs 挂载；共用部件：actions.mjs
-                       （封面按钮、「更多」菜单）、detail-header.mjs、library-ui.mjs、download-dialog.mjs、alac-check-dialog.mjs
+                       （封面按钮、「更多」菜单）、artwork-menu.mjs（保存封面 / 动态封面）、detail-header.mjs、library-ui.mjs、
+                       download-dialog.mjs、alac-check-dialog.mjs、
+                       links.mjs（Apple Music / 编辑链接 → 本站页面）；首页拆为 home.mjs、search-results.mjs、categories.mjs
 crates/
   am-mp4/              ISOBMFF 解析、box 修补、样本解密；内嵌预取密钥的模板
   am-alac/             保守的 ALAC 包尾修复

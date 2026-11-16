@@ -185,6 +185,20 @@ const duetTtml = `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3
         await page.keyboard.press('Escape');
         await page.locator('.lyrics-menu').waitFor({ state: 'hidden' });
         assert(await page.locator('#lyrics-overlay').isVisible(), 'Escape closes only the menu');
+        // 视口放不下整个菜单（字体多时）：菜单限高、留在视口内，在里面滚动
+        await page.setViewportSize({ width, height: 420 });
+        await openMenu();
+        const fit = await page.evaluate(() => {
+          const m = document.querySelector('.lyrics-menu');
+          const r = m.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, scrolls: m.scrollHeight > m.clientHeight };
+        });
+        assert(fit.top >= 0 && fit.bottom <= 420 && fit.left >= 0 && fit.right <= width, `the menu stays inside a short viewport: ${JSON.stringify(fit)}`);
+        assert(fit.scrolls, 'a menu taller than the viewport scrolls');
+        await page.screenshot({ path: `target/ui-lyrics-menu-short-${width}.png` });
+        await page.keyboard.press('Escape');
+        await page.locator('.lyrics-menu').waitFor({ state: 'hidden' });
+        await page.setViewportSize({ width, height: 844 });
 
         await page.evaluate(() => { fakeTransport.currentTime = 5.5; });
         await page.waitForTimeout(300);
@@ -367,6 +381,41 @@ const duetTtml = `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3
         await page.keyboard.press('Escape');
         assert(await page.locator('.quality-panel').isHidden(), 'Escape closes the quality panel');
         assert(await page.locator('#lyrics-overlay').isVisible(), 'Escape keeps the lyrics view open while closing the quality panel');
+        // 弹出的菜单开着时点歌词行：只收起菜单，不跳转（音质详情、歌词选项菜单、标题旁「更多」）
+        const tapLine = async (avoid) => {
+          const box = avoid ? await page.locator(avoid).boundingBox() : null;
+          for (const line of await page.locator(lineSel).all()) {
+            const r = await line.boundingBox();
+            if (!r || r.height < 4) continue;
+            const y = r.y + r.height / 2;
+            for (const x of [r.x + 8, r.x + r.width / 2, r.x + r.width - 8]) {
+              if (box && x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) continue;
+              // 只点这一行露在最上层的地方（菜单的遮罩除外）
+              const hit = await line.evaluate((node, [x, y]) => document.elementsFromPoint(x, y)
+                .find((e) => !e.matches('.lyrics-menu-scrim, .menu-scrim'))?.closest('[class*="_lyricLineWrapper"]') === node, [x, y]);
+              if (!hit) continue;
+              await page.mouse.click(x, y);
+              return;
+            }
+          }
+          throw new Error(`no lyric line outside ${avoid}`);
+        };
+        await page.evaluate(() => { fakeTransport.currentTime = 1.5; });
+        await tapLine();
+        assert.equal(await page.evaluate(() => fakeTransport.currentTime) === 1.5, false, 'tapping a line seeks when no menu is open');
+        for (const [name, open, sel] of [
+          ['quality panel', () => qualityBadge.click(), '.quality-panel'],
+          ['lyrics menu', () => page.locator('.lyrics-translation-button').click(), '.lyrics-menu'],
+          ['More menu', () => page.locator('.lyrics-more').click(), '.menu'],
+        ]) {
+          await open();
+          await page.locator(`${sel}:not([hidden])`).waitFor();
+          await page.evaluate(() => { fakeTransport.currentTime = 1.5; });
+          await tapLine(sel);
+          await page.locator(sel).waitFor({ state: 'hidden' });
+          await page.waitForTimeout(100);
+          assert.equal(await page.evaluate(() => fakeTransport.currentTime), 1.5, `tapping a line closes the ${name} without seeking (${width}px)`);
+        }
         await page.screenshot({ path: `target/ui-lyrics-${width}.png` });
 
         // 标题旁的喜爱与「更多」（同 music.apple.com 全屏播放界面）：喜爱正在播放的歌曲并加入资料库
