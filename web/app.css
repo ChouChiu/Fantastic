@@ -1801,7 +1801,7 @@ html[dir="rtl"] .lyrics-controls .player .volume::-moz-range-track { background:
 .lyrics-translation-menu { position: absolute; z-index: 2; display: flex; }
 .layout-h .lyrics-translation-menu { top: max(20px, env(safe-area-inset-top, 0px)); inset-inline-end: 20px; }
 .layout-v .lyrics-translation-menu { inset-inline-start: var(--pad, 3em); bottom: calc(var(--lyrics-controls-h, 0px) + 20px); }
-@media (max-width: 480px) { .layout-v .lyrics-translation-menu { --pad: 20px; } }
+@media (max-width: 480px) { .layout-v .lyrics-translation-menu { --pad: 2em; } }
 .lyrics-translation-menu[hidden], .lyrics-overlay:is(.lyrics-hidden, .queue-open) .lyrics-translation-menu { display: none; }
 .lyrics-overlay .lyrics-translation-menu .lyrics-translation-button { --size: 2.5em; }
 :is(.lyrics-toggles .player-lyrics, .lyrics-toggles .player-queue, .lyrics-translation-button) {
