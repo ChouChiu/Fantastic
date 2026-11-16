@@ -75,9 +75,11 @@ Paths under `web/` are served at `/assets/<same path>`, so a URL in the browser'
 | AutoMix and crossfades | `player/automix.js` (planning), `Mixer` / `Voice` in `player/player.js` | — |
 | Music videos | `mv/` (playlists, engine, captions), `views/mv.mjs`, `media/` | `src/handlers.rs` (`/parse/mv*`, `/mv/*`), `crates/am-media` (PlayReady, CENC/CBCS, mux, defrag, captions) |
 | Radio and stations | `station.mjs` (token, licenses), `mv/radio.mjs` (HLS), `views/station.mjs`, `views/browse.mjs` (Radio page) | `src/amp.rs` (`station_*`), `serverless/core.mjs` |
-| Catalog pages and search | `views/*.mjs`, `views/actions.mjs` (cover buttons, More menus), `i18n.js` (storefront, language) | `src/amp.rs` (token, HTTP/2, cache), `serverless/core.mjs` |
+| Catalog pages and search | `views/*.mjs`, `views/actions.mjs` (cover buttons, More menus), `amp.mjs` (`/amp` requests, artwork URLs), `views/links.mjs` (links → local pages), `i18n.js` (storefront, language) | `src/amp.rs` (token, HTTP/2, cache), `serverless/core.mjs` |
+| Home: search and Browse Categories | `views/home.mjs` (input, suggestions, recent searches), `views/search-results.mjs` (results), `views/categories.mjs` (category bricks) | `src/amp.rs` (`/amp/v1/catalog`, `recommendations_handler`), `serverless/core.mjs` |
 | Lyrics | `lyrics/` (`panel.mjs` wires the view to the player; `ttml.mjs`, `fonts.mjs`, `backdrop*.mjs`, `pulse.mjs`) | `src/handlers.rs` (`/lyrics`) |
 | Downloads | `download/` (manager, center, tags, ZIP, names), `views/download-dialog.mjs`, `media/` (defrag) | — |
+| Motion artwork and the cover menu | `download/motion.mjs` (variants, quality choice, segments → progressive MP4), `views/artwork-menu.mjs` (right-click / long-press on any cover), `motion-art.mjs` (playback, playlist parsing) | — |
 | Library and playlists | `library.mjs` (IndexedDB), `views/library*.mjs` | — (browser only) |
 | Settings | `prefs.mjs` (store), `views/settings*.mjs` (page), `pickers.mjs` (nav pickers) | — |
 | wrapper-lite modes and limits | `wrapper.js`, `pickers.mjs`, `host.js` | `src/wrapper.rs`, `src/limit.rs`, `src/handlers.rs` (`require_relay`) |
@@ -91,7 +93,8 @@ src/                   Rust server (the binary)
   cli.rs               Command-line options
   lib.rs               Router: asset routes, wrapper-lite relays behind the limits, amp-api and station endpoints, page fallback
   state.rs             Configuration and shared clients (AppState)
-  assets.rs            Embedded front end: the asset table (web/<path> = /assets/<path>), content-hashed URLs, ETags
+  assets.rs            Embedded front end: the asset table (web/<path> = /assets/<path>), content-hashed URLs, ETags, br / gzip
+  security.rs          Security response headers (CSP, nosniff, framing) on every response
   handlers.rs          Page shell and fallback for Apple Music page paths, host.js, wrapper-lite relays
                        (status, song master, key, lyrics, MV master / webplayback / license)
   wrapper.rs           wrapper-lite client: rate and concurrency limits, Authorization, queue stats
@@ -111,6 +114,7 @@ web/                   Browser app: embedded into the binary, served at /assets/
   wrapper.js           wrapper-lite client: server relay or direct local wrapper-lite, master parsing, 429 back-off (AmWrapper)
   library.mjs          Library and playlist store (IndexedDB, cross-tab sync, import / export format and validation)
   station.mjs          Station endpoints needing a media-user-token; license request formats
+  amp.mjs              Shared /amp requests (amp(): drops an unsupported l, retries 5xx) and artwork URL templates (artUrl)
   motion-art.mjs       Motion artwork on album, playlist and artist pages (editorialVideo HLS via MSE)
   alac-check.mjs       ALAC check: damaged escape-frame ends, packaging date, real bit depth and bandwidth
   player/              player.js: playback engines (MSE, FLAC, EC-3 PCM, JOC), mixer, queue and player bar (AmPlayer);
@@ -123,11 +127,14 @@ web/                   Browser app: embedded into the binary, served at /assets/
   joc/                 Dolby Atmos objects (JOC): decode worker, joc.wasm, AudioWorklet output, spatial scene, hrtf/ (SADIE II)
   mv/                  MV playlists and track choice (hls.mjs), playback and download (engine.mjs), CEA-608 captions,
                        station HLS (radio.mjs), styles
-  download/            Batch downloads: manager (downloads.mjs), download center (center.mjs), iTunes tags, ZIP, file names
+  download/            Batch downloads: manager (downloads.mjs), download center (center.mjs), iTunes tags, ZIP, file names,
+                       motion artwork (motion.mjs)
   lyrics/              Lyrics view: panel.mjs (wiring to the player), TTML parsing, LRC export, the AMLL bundle,
                        artwork backdrop, beat pulse, font library and catalog
   views/               Page views: <name>.html + <name>.mjs (+ <name>.css), mounted by app.mjs; shared parts: actions.mjs
-                       (cover buttons, More menus), detail-header.mjs, library-ui.mjs, download-dialog.mjs, alac-check-dialog.mjs
+                       (cover buttons, More menus), artwork-menu.mjs (save cover / motion artwork), detail-header.mjs,
+                       library-ui.mjs, download-dialog.mjs, alac-check-dialog.mjs,
+                       links.mjs (Apple Music / editorial links → local pages); the home page is home.mjs, search-results.mjs, categories.mjs
 crates/
   am-mp4/              ISOBMFF parsing, box patching, sample decryption; embeds the prefetch-key template
   am-alac/             Conservative ALAC end-tag repair

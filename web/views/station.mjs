@@ -5,12 +5,12 @@ import { trackKey } from '../sources/track.mjs';
 //   直播电台与广播单集（format = stream）：与 MV 页相同的布局，用 mv/radio.mjs 播放；广播单集可以下载（音频为 M4A，视频为 MP4），
 //     直播电台显示当前歌曲（emsg）与节目表。
 // 这些接口需要用户的 media-user-token（见 station.mjs）：第一次打开电台页时请用户填写。
-import { createActions, ICON as ACTION_ICON, playable, targetOf, songEntry, pagePath, artistLinks, albumPathOf, localPath } from './actions.mjs';
+import { createActions, setPlayButton, ICON as ACTION_ICON, playable, targetOf, songEntry, pagePath, artistLinks, albumPathOf, localPath } from './actions.mjs';
 import { createDetailHeader } from './detail-header.mjs';
 import { openDownloadDialog } from './download-dialog.mjs';
 import { stationKind, withToken, askToken, onTokenChange, nextTracks, playAssets } from '/assets/station.mjs';
 import { buildIlst, imageType } from '/assets/download/mp4-tags.mjs';
-import { ampFetch } from '../amp-fetch.mjs';
+import { amp, artUrl } from '../amp.mjs';
 
 const { formatTime } = window.AmHook;
 const { AmDecrypt, AmI18n } = window;
@@ -35,28 +35,10 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-/** artwork.url 模板 {w}x{h}{c}.{f} */
-function artUrl(artwork, w, h = w, crop = 'bb') {
-  return artwork && artwork.url ? artwork.url.replace('{w}', w).replace('{h}', h).replace('{c}', crop).replace('{f}', 'jpg') : '';
-}
-
 const rel = (res, key) => (res && res.relationships && res.relationships[key] && res.relationships[key].data) || [];
 
 function plainText(html) {
   return html ? new DOMParser().parseFromString(html, 'text/html').body.textContent.trim() : '';
-}
-
-async function amp(path, params) {
-  const target = new URL('/amp' + path, location.origin);
-  for (const [key, value] of Object.entries(params || {})) if (value !== undefined) target.searchParams.set(key, value);
-  let res = await ampFetch(target);
-  if (res.status === 400 && target.searchParams.has('l')) {
-    target.searchParams.delete('l');
-    res = await ampFetch(target);
-  }
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);
-  return data;
 }
 
 /** 电台的种类文字（眉题与徽标） */
@@ -220,6 +202,7 @@ function mountTracks({ signal, player, navigate, toast }, $) {
     if (canPlay) {
       playBtn = el('button', { className: 'track-play', type: 'button', innerHTML: ICON.play });
       playBtn.setAttribute('aria-label', t('album.playTrack', { name: a.name }));
+      playBtn.dataset.name = a.name;
       playBtn.addEventListener('click', () => playTrack(track));
       cover.append(playBtn);
     }
@@ -279,7 +262,7 @@ function mountTracks({ signal, player, navigate, toast }, $) {
     $('refresh').disabled = $('more').disabled = true;
     if (!tracks.length) showAlert('info', () => t('station.tracksLoading'));
     try {
-      const list = await withToken((token) => nextTracks(id, { token, limit: BATCH }));
+      const list = await withToken(() => nextTracks(id, { limit: BATCH }));
       if (signal.aborted) return;
       if (!list.length && !tracks.length) showAlert('info', () => t('station.empty'));
       else showAlert('', '');
@@ -324,7 +307,7 @@ function mountTracks({ signal, player, navigate, toast }, $) {
       row.classList.toggle('playing', active);
       row.classList.toggle('paused', active && !playing);
       row.classList.toggle('loading', player.pendingKey === trackKey({ id: trackId }));
-      if (playBtn) playBtn.innerHTML = active && playing ? ICON.pause : ICON.play;
+      if (playBtn) setPlayButton(playBtn, active && playing, ICON.play, ICON.pause);
     }
   }
   player.onChange(syncRows);
@@ -543,7 +526,7 @@ function mountStream({ signal, player: music }, $) {
     $('error').hidden = true;
     status('station.loadingStream');
     try {
-      asset = await withToken((token) => playAssets(station.attributes.playParams, { token, signal }));
+      asset = await withToken(() => playAssets(station.attributes.playParams, { signal }));
       const { openRadio } = await loadEngine();
       radio = await openRadio(asset, { video: kind.video, signal });
       if (signal.aborted) return;

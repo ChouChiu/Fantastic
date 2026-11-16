@@ -578,13 +578,15 @@ dependencies = [
 
 [[package]]
 name = "fantastic"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "am-mp4",
  "axum",
  "base64",
+ "brotli",
  "bytes",
  "clap",
+ "flate2",
  "futures",
  "lru",
  "regex",

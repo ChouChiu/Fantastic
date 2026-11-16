@@ -11,10 +11,12 @@
 //   加入资料库或歌单时不再重新请求；getTracks()：要加入歌单的曲目快照（本地歌单用）；playlistId：「添加到歌单」里不列出的歌单；
 //   extraItems：页面自己的菜单项（如「从歌单中删除」）；noPlay：菜单里不列出「播放」（正在播放的歌曲）
 import * as library from '/assets/library.mjs';
-import { LIB_ICON, playlistMenuItems, moveMenuItems } from './library-ui.mjs';
+import { LIB_ICON, playlistMenuItems, moveMenuItems, setPlayButton } from './library-ui.mjs';
+
+export { setPlayButton };
 import { downloads } from '../download/downloads.mjs';
 import * as qq from '../sources/qq.mjs';
-import { ampFetch } from '../amp-fetch.mjs';
+import { amp, artUrl } from '../amp.mjs';
 
 const { AmI18n } = window;
 const { t } = AmI18n;
@@ -83,22 +85,6 @@ function el(tag, props = {}, ...children) {
 }
 
 /* ---------- amp-api 与资源 ---------- */
-async function amp(path, params) {
-  const url = new URL('/amp' + path, location.origin);
-  for (const [key, value] of Object.entries(params || {})) if (value !== undefined) url.searchParams.set(key, value);
-  let res = await ampFetch(url);
-  if (res.status === 400 && url.searchParams.has('l')) {
-    url.searchParams.delete('l');
-    res = await ampFetch(url);
-  }
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);
-  return data;
-}
-
-function artUrl(artwork, w) {
-  return artwork && artwork.url ? artwork.url.replace('{w}', w).replace('{h}', w).replace('{c}', 'bb').replace('{f}', 'jpg') : '';
-}
 
 const KINDS = { songs: 'song', 'music-videos': 'music-video', albums: 'album', playlists: 'playlist', artists: 'artist' };
 
@@ -386,7 +372,7 @@ export function copyText(text, done) {
 }
 
 /* ---------- 弹出菜单：整站一个，fixed 定位，避免被列表 overflow 裁剪 ---------- */
-const menu = { el: null, scrim: null, trigger: null, player: null };
+const menu = { el: null, scrim: null, trigger: null, player: null, point: null, token: 0 };
 /** 与官网 amp-contextual-menu 相同，xsmall（< 484px）时菜单 270px 宽、居中贴底，背后有遮罩 */
 const SHEET = matchMedia('(max-width: 483px)');
 
@@ -409,7 +395,10 @@ function menuEl() {
     else if (e.key === 'Tab') closeMenu(false);
   });
   document.addEventListener('pointerdown', (e) => {
-    if (menu.trigger && e.target !== menu.scrim && !menu.el.contains(e.target) && !menu.trigger.contains(e.target)) closeMenu(false);
+    if (!menu.trigger || e.target === menu.scrim || menu.el.contains(e.target) || (!menu.point && menu.trigger.contains(e.target))) return;
+    // 全屏播放界面里没有遮罩时（宽屏）同歌词选项菜单：点别处只收起菜单，这次点按不落到下面（如歌词行跳转）
+    if (menu.trigger.closest('#lyrics-overlay')) swallowClick();
+    closeMenu(false);
   });
   addEventListener('resize', () => closeMenu(false));
   addEventListener('scroll', (e) => {
@@ -420,29 +409,47 @@ function menuEl() {
   return menu.el;
 }
 
+/** 吞掉这次按下之后的 click（同 player.js 的 swallowClick）；按下后拖动滚动或下一次按下时撤销 */
+function swallowClick() {
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
+  const done = () => {
+    removeEventListener('click', stop, true);
+    removeEventListener('pointercancel', done, true);
+    removeEventListener('pointerdown', done, true);
+  };
+  addEventListener('click', stop, true);
+  addEventListener('pointercancel', done, true);
+  addEventListener('pointerdown', done, true);
+}
+
 function closeMenu(focusTrigger) {
   if (!menu.trigger) return;
   menu.el.hidden = true;
   menu.scrim.hidden = true;
-  menu.trigger.setAttribute('aria-expanded', 'false');
+  if (!menu.point) menu.trigger.setAttribute('aria-expanded', 'false');
+  menu.point = null;
+  menu.token++;
   menu.trigger.closest('.card-wrap, .row-wrap')?.classList.remove('menu-open');
-  if (focusTrigger) menu.trigger.focus();
+  if (focusTrigger && menu.trigger.isConnected) menu.trigger.focus({ preventScroll: true });
   menu.trigger = null;
 }
 
 /**
- * items：'-' 分隔线，或 { icon, label, hint?, title?, onSelect }；hint 为第二行小字，title 为悬停提示（如完整链接）；
- * 带 submenu()（返回子菜单项）的项点击后在原位置换成子菜单，第一项「‹ 名称」返回上一级（如「添加到歌单」）
+ * items：'-' 分隔线，或 { icon, label, hint?, title?, disabled?, onSelect }；hint 为第二行小字，title 为悬停提示（如完整链接）；
+ * 带 submenu()（返回子菜单项，或返回它们的 Promise，等待时显示「正在载入」）的项点击后在原位置换成子菜单，
+ * 第一项「‹ 名称」返回上一级（如「添加到歌单」）。
+ * at：{ x, y } 时为右键 / 长按菜单（见 artwork-menu.mjs）：在该点展开，trigger 只用来判断点按是否落在菜单外
  */
-export function openMenu(trigger, items) {
+export function openMenu(trigger, items, at = null) {
   const box = menuEl();
-  const reopen = menu.trigger === trigger;
+  const reopen = !at && menu.trigger === trigger;
   closeMenu(false);
   if (reopen) return;
   box.hidden = false;
   menu.scrim.hidden = false;
   menu.trigger = trigger;
-  trigger.setAttribute('aria-expanded', 'true');
+  menu.point = at;
+  if (!at) trigger.setAttribute('aria-expanded', 'true');
   // 菜单打开期间封面上的按钮保持显示
   trigger.closest('.card-wrap, .row-wrap')?.classList.add('menu-open');
   fillMenu(items);
@@ -450,9 +457,11 @@ export function openMenu(trigger, items) {
 
 function fillMenu(items) {
   const box = menu.el;
+  // 换了一级菜单（返回上一级、关闭）后，尚在载入的子菜单不再填入
+  menu.token++;
   box.replaceChildren(...items.map((it) => {
     if (it === '-') return el('div', { className: 'menu-sep', role: 'separator' });
-    const node = el('button', { className: `menu-item${it.back ? ' menu-back' : ''}${it.danger ? ' danger' : ''}`, type: 'button', innerHTML: it.icon, tabIndex: -1 });
+    const node = el('button', { className: `menu-item${it.back ? ' menu-back' : ''}${it.danger ? ' danger' : ''}`, type: 'button', innerHTML: it.icon || '', tabIndex: -1, disabled: !!it.disabled });
     node.setAttribute('role', 'menuitem');
     if (it.submenu) node.setAttribute('aria-haspopup', 'menu');
     node.append(el('span', { className: 'menu-text' }, el('span', { className: 'menu-label', textContent: it.label }),
@@ -460,11 +469,19 @@ function fillMenu(items) {
     if (it.title) node.title = it.title;
     node.addEventListener('click', () => {
       if (it.submenu) {
-        fillMenu([{ icon: LIB_ICON.back, label: it.label, back: true, onSelect: () => fillMenu(items) }, '-', ...it.submenu()]);
+        const head = [{ icon: LIB_ICON.back, label: it.label, back: true, onSelect: () => fillMenu(items) }, '-'];
+        const sub = it.submenu();
+        if (!sub || typeof sub.then !== 'function') { fillMenu([...head, ...sub]); return; }
+        // 异步的子菜单：先显示「正在载入」，载入后菜单仍停在这一级时再换上
+        fillMenu([...head, { label: t('action.loading'), disabled: true }]);
+        const token = menu.token;
+        sub.then((list) => list, (err) => [{ label: t('action.loadFailed', { msg: (err && err.message) || String(err) }), disabled: true }])
+          .then((list) => { if (menu.token === token && menu.trigger) fillMenu([...head, ...list]); });
         return;
       }
       if (it.back) { it.onSelect(); return; }
-      closeMenu(false);
+      // 先把焦点还给触发按钮再执行：选项打开的对话框关闭时焦点回到这里，而不是落到 <body>
+      closeMenu(true);
       it.onSelect();
     });
     return node;
@@ -488,9 +505,19 @@ function positionMenu() {
     box.style.top = `${top + height - box.getBoundingClientRect().height - 25}px`;
     return;
   }
-  const r = menu.trigger.getBoundingClientRect();
+  const p = menu.point;
+  const r = p ? { top: p.y, bottom: p.y, left: p.x, right: p.x } : menu.trigger.getBoundingClientRect();
   box.style.maxHeight = '';
   const m = box.getBoundingClientRect();
+  if (p) {
+    // 右键菜单：左上角对准指针，放不下时往左 / 往上翻
+    const bottomEdge = innerHeight - 8;
+    const height = Math.min(m.height, bottomEdge - 8);
+    if (height < m.height) box.style.maxHeight = `${height}px`;
+    box.style.top = `${Math.max(8, p.y + height > bottomEdge ? p.y - height : p.y)}px`;
+    box.style.left = `${Math.max(8, p.x + m.width > innerWidth - 8 ? p.x - m.width : p.x)}px`;
+    return;
+  }
   const bottom = Math.min(innerHeight, menu.player ? menu.player.barTop() : innerHeight) - 8;
   const below = bottom - r.bottom - 6;
   const above = r.top - 6 - 8;

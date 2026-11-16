@@ -3,11 +3,12 @@ import { trackKey } from '../sources/track.mjs';
 // 布局照官网歌曲页（song-header-page 与 credits_detail）：头部、制作人员，最后是音乐视频与艺人的更多作品；
 // 头部之下是本站的音质列表：wrapper-lite 给出的 master m3u8 中的全部音频变体，按格式分组，可在线播放、下载解密文件；
 // 同时取网页版（amp-api extendedAssetUrls.enhancedHls）的 master 比较：两者可能是不同的打包，音质也可能不同
-import { createActions, openMenu, copyText, targetOf, pagePath, artistLinks, albumPathOf, openAlacCheck, ICON as ACTION_ICON } from './actions.mjs';
+import { createActions, setPlayButton, openMenu, copyText, targetOf, pagePath, artistLinks, albumPathOf, openAlacCheck, ICON as ACTION_ICON } from './actions.mjs';
 import { compareAlac, pickAlac } from '../alac-check.mjs';
 import { createDetailHeader } from './detail-header.mjs';
 import { downloads } from '../download/downloads.mjs';
 import { prefs, playbackFor } from '../prefs.mjs';
+import { artUrl } from '../amp.mjs';
 import { ampFetch } from '../amp-fetch.mjs';
 
 const { detectMode, qualityBadge, qualityIcon, formatTime, pickPlayable } = window.AmHook;
@@ -69,11 +70,6 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
   const explicitBadge = () => el('span', { className: 'explicit', textContent: 'E', title: t('search.explicit') });
   const related = (resource, key) => ((resource && resource.relationships && resource.relationships[key] && resource.relationships[key].data) || [])
     .filter((r) => r.attributes);
-
-  /** artwork.url 模板：{w}x{h}{c}.{f} */
-  function artUrl(artwork, w, h = w) {
-    return artwork && artwork.url ? artwork.url.replace('{w}', w).replace('{h}', h).replace('{c}', 'bb').replace('{f}', 'jpg') : '';
-  }
 
   /** message 可以是函数，切换语言时会重新求值 */
   let alertState = null;
@@ -363,7 +359,7 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
       const active = isCurrent(v);
       row.classList.toggle('playing', active);
       row.classList.toggle('paused', active && !playing);
-      if (v.mode) playBtn.innerHTML = active && playing ? ICON.pause : ICON.play;
+      if (v.mode) setPlayButton(playBtn, active && playing, ICON.play, ICON.pause);
     }
     const mine = !!current && trackKey(current) === trackKey({ id: adamId }) && playing;
     const btn = $('play-best');

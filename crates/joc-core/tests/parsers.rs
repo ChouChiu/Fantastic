@@ -117,7 +117,7 @@ fn id14_dense_object_dequantises_to_zero() {
     assert_eq!(params.present_mask, 1);
     assert!((params.clipgain - 1.0).abs() < 1e-12);
     assert_eq!(params.objects[0].n_bands, 1);
-    for channel in params.objects[0].dq[0].iter().take(5) {
+    for channel in &params.objects[0].dq[0][..5] {
         assert_eq!(channel[0], 0.0);
     }
 }

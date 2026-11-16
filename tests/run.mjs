@@ -6,7 +6,7 @@
 // A filter keeps the files whose name contains it (`node tests/run.mjs ui library`).
 // ui / live pass the Playwright package as the first argument: $PLAYWRIGHT, else target/pw/node_modules/playwright-core
 // when present, else `playwright` from node_modules. live scripts read the server from $AM_HOOK_URL
-// (default http://127.0.0.1:8888); the MV / radio scripts take it as their second argument, which is passed through.
+// (default http://127.0.0.1:8888), which is also passed through as their second argument.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,12 +35,17 @@ if (suite === 'unit') {
 const local = path.join(root, 'target/pw/node_modules/playwright-core');
 const playwright = process.env.PLAYWRIGHT || (fs.existsSync(local) ? local : 'playwright');
 const base = process.env.AM_HOOK_URL;
+// live：页面带 CSP（不允许 eval），Playwright 的 waitForFunction 等会被拦下；除 csp_live 外经包装默认 bypassCSP
+// （见 tests/support/playwright-bypass-csp.cjs），AM_PLAYWRIGHT_REAL 为原包
+const bypass = path.join(root, 'tests/support/playwright-bypass-csp.cjs');
+const env = { ...process.env, AM_PLAYWRIGHT_REAL: playwright };
 const results = [];
 for (const file of files) {
   const started = Date.now();
   console.log(`\n=== ${suite}/${file}`);
-  const args = [path.join('tests', suite, file), playwright, ...(suite === 'live' && base ? [base] : [])];
-  const { status } = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
+  const pw = suite === 'live' && file !== 'csp_live.cjs' ? bypass : playwright;
+  const args = [path.join('tests', suite, file), pw, ...(suite === 'live' && base ? [base] : [])];
+  const { status } = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit', env });
   results.push({ file, ok: status === 0, seconds: ((Date.now() - started) / 1000).toFixed(1) });
 }
 console.log(`\n${suite} summary:`);

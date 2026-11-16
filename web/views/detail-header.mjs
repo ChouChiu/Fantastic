@@ -77,9 +77,11 @@ export function createDetailHeader({ $, signal, artUrl, rerender }) {
   // 离开页面时停止动态封面（尚在加载的不再挂载）
   signal.addEventListener('abort', () => { motionKey = ''; if (motion) motion.destroy(); motion = null; });
 
-  function setImg(container, src, alt = '') {
+  /** priority：fetchpriority（主封面是页面的 LCP 图片用 high，模糊光晕用 low） */
+  function setImg(container, src, alt = '', priority = 'auto') {
     if (!src) return;
     const img = container.querySelector('img') || container.appendChild(Object.assign(document.createElement('img'), { alt: '', decoding: 'async' }));
+    img.fetchPriority = priority;
     if (img.getAttribute('src') !== src) img.src = src;
     img.alt = alt;
   }
@@ -92,9 +94,20 @@ export function createDetailHeader({ $, signal, artUrl, rerender }) {
     document.body.classList.toggle('tall-art', tall);
 
     const src = artUrl(cover, 632);
-    setImg($('art'), src, alt);
-    setImg($('radiosity'), artUrl(cover, 160));
-    if (tall) setImg($('tall-art'), artUrl(tallStatic, 1080, 1440));
+    setImg($('art'), src, alt, tall ? 'auto' : 'high');
+    setImg($('radiosity'), artUrl(cover, 160), '', 'low');
+    if (tall) setImg($('tall-art'), artUrl(tallStatic, 1080, 1440), '', 'high');
+
+    // 封面菜单（artwork-menu.mjs）：方形与竖版两个动态封面都可保存，文件名用专辑 / 歌单名
+    const sources = [['square', video.motionDetailSquare], ['tall', video.motionDetailTall]]
+      .filter(([, v]) => v && v.video).map(([kind, v]) => ({ kind, src: v.video }));
+    for (const id of ['art', 'tall-art']) {
+      const box = $(id);
+      if (!box) continue;
+      if (sources.length) box.dataset.motion = JSON.stringify(sources);
+      else delete box.dataset.motion;
+      box.dataset.artworkName = attrs.name || alt || '';
+    }
 
     const source = tall ? video.motionDetailTall : video.motionDetailSquare;
     // 主题色：动态封面首帧的 bgColor，没有时取所用封面的 bgColor

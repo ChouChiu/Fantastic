@@ -1,0 +1,53 @@
+// amp-api（经服务端 /amp 代理，见 src/amp.rs 与 serverless/core.mjs）的公共请求与封面地址工具，各页面视图与下载共用
+import { ampFetch } from './amp-fetch.mjs';
+
+/**
+ * GET /amp<path>?<params>，返回 JSON。
+ * - 值为 undefined 或空字符串的参数不传（如地区不支持当前语言时的 l）；
+ * - 请求经 amp-fetch.mjs 的 ampFetch：网络错误、429 / 502 / 503 / 504、200 但响应体为空或不是 JSON 时自动重试；
+ * - amp-api 偶尔返回 5xx（如 charts 的「Service failure」），重试后仍是 5xx 时稍等再请求一次；
+ * - 地区不支持所选语言时返回 400，去掉 l 改用地区默认语言再请求一次。
+ * path 可以是接口返回的 next 分页地址（自带查询参数），params 会补在其后。
+ */
+export async function amp(path, params, { signal } = {}) {
+  const url = new URL('/amp' + path, location.origin);
+  for (const [key, value] of Object.entries(params || {})) if (value !== undefined && value !== '') url.searchParams.set(key, value);
+  let res = await ampFetch(url, { signal });
+  if (res.status >= 500) {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    signal?.throwIfAborted();
+    res = await ampFetch(url, { signal });
+  }
+  if (res.status === 400 && url.searchParams.has('l')) {
+    url.searchParams.delete('l');
+    res = await ampFetch(url, { signal });
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);
+  return data;
+}
+
+const ART =/^(https:\/\/[a-z0-9-]+\.mzstatic\.com\/image\/thumb\/.+\/)(\d+)x(\d+)([^/]*?)\.(jpe?g|png|webp|avif|heic)([?#].*)?$/i;
+
+/**
+ * 反过来：页面上的 mzstatic 图片地址 → artwork.url 模板（{w}x{h}bb.{f}），不是 Apple 封面时返回 ''（封面菜单 views/artwork-menu.mjs 用）。
+ * 两个字母的裁切码（bb、cc、sr、ea 等，可带 -NN 质量后缀）一律换成 bb，取完整的原图；
+ * 地址里的特殊裁切（如歌单封面的 SC.DN01）与查询参数（封面文字的语言）保留
+ */
+export function artworkTemplate(src) {
+  const m = ART.exec(src || '');
+  if (!m) return '';
+  const crop = /^([a-z]{2})?(-\d+)?$/i.test(m[4]) ? 'bb' : m[4];
+  return `${m[1]}{w}x{h}${crop}.{f}${m[6] || ''}`;
+}
+
+/**
+ * amp-api 的 artwork.url 是 {w}x{h}{c}.{f} 模板（请求带 art[url]=c,f 时保留 {c} / {f}）。
+ * crop 为官网使用的裁切码（bb 原比例、sr 指定矩形、cc 居中方形、ea / vf 通栏图等）；
+ * 部分歌单封面的裁切码已写在地址里（如 SC.DN01），这时没有 {c}。
+ * QQ 专辑 / 艺人 / 歌单 / MV 的 cover、avatar 是已定尺寸的字符串，原样返回。
+ */
+export function artUrl(artwork, w, h = w, crop = 'bb', format = 'jpg') {
+  const url = typeof artwork === 'string' ? artwork : artwork?.url;
+  return url ? url.replace('{w}', w).replace('{h}', h).replace('{c}', crop).replace('{f}', format) : '';
+}
