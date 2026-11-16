@@ -8,6 +8,7 @@ import { compareAlac, pickAlac } from '../alac-check.mjs';
 import { createDetailHeader } from './detail-header.mjs';
 import { downloads } from '../download/downloads.mjs';
 import { prefs, playbackFor } from '../prefs.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { detectMode, qualityBadge, qualityIcon, formatTime, pickPlayable } = window.AmHook;
 const { AmDecrypt, AmI18n, AmWrapper } = window;
@@ -414,11 +415,11 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
     for (const [key, value] of Object.entries(SONG_PARAMS)) req.searchParams.set(key, value);
     const l = await AmI18n.catalogLang(cc);
     if (l) req.searchParams.set('l', l);
-    let res = await fetch(req, { signal: AbortSignal.timeout(8000) });
+    let res = await ampFetch(req, { signal: AbortSignal.timeout(8000) });
     // 语言参数被拒绝时去掉 l，改用地区默认语言
     if (res.status === 400 && req.searchParams.has('l')) {
       req.searchParams.delete('l');
-      res = await fetch(req, { signal: AbortSignal.timeout(8000) });
+      res = await ampFetch(req, { signal: AbortSignal.timeout(8000) });
     }
     if (!res.ok) return null;
     const resource = (await res.json()).data?.[0];

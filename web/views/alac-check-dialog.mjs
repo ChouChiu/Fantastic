@@ -3,6 +3,7 @@
 // extendedAssetUrls.enhancedHls）可能是不同的打包，音质也可能更高；两边最高音质 ALAC 的 media m3u8 相同时只检测一次。
 // 结果逐行显示，单击一行展开详情（各来源的原样帧列表、打包信息、第一个分段的实际位深与频谱），可复制文字报告。关闭对话框即停止检测。
 import { checkSources, compareAlac, createAnalyzer, createLimiter, interpretAnalysis, DEFECTS } from '../alac-check.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { AmI18n } = window;
 const { t } = AmI18n;
@@ -406,7 +407,7 @@ export function openAlacCheckDialog({ kind = 'album', id, country, resource, tra
         url.searchParams.set('ids', batch.map((x) => x.track.id).join(','));
         url.searchParams.set('extend', 'extendedAssetUrls');
         url.searchParams.set('fields[songs]', 'extendedAssetUrls');
-        const res = await fetch(url);
+        const res = await ampFetch(url);
         const data = res.ok ? await res.json() : {};
         const found = new Map((data.data || []).map((r) => [r.id, r.attributes ? (r.attributes.extendedAssetUrls || {}).enhancedHls || null : null]));
         for (const x of batch) x.master = found.get(x.track.id) ?? null;

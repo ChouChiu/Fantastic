@@ -14,6 +14,7 @@ import * as library from '/assets/library.mjs';
 import { LIB_ICON, playlistMenuItems, moveMenuItems } from './library-ui.mjs';
 import { downloads } from '../download/downloads.mjs';
 import * as qq from '../sources/qq.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { AmI18n } = window;
 const { t } = AmI18n;
@@ -85,10 +86,10 @@ function el(tag, props = {}, ...children) {
 async function amp(path, params) {
   const url = new URL('/amp' + path, location.origin);
   for (const [key, value] of Object.entries(params || {})) if (value !== undefined) url.searchParams.set(key, value);
-  let res = await fetch(url);
+  let res = await ampFetch(url);
   if (res.status === 400 && url.searchParams.has('l')) {
     url.searchParams.delete('l');
-    res = await fetch(url);
+    res = await ampFetch(url);
   }
   const data = await res.json().catch(() => null);
   if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);

@@ -4,6 +4,7 @@
 import { parseMaster, recommendedAudio } from '/assets/mv/hls.mjs';
 import { fetchMaster, Playback, DirectPlayback, downloadMV, downloadDirect, mime, collectGarbage } from '/assets/mv/engine.mjs';
 import { mvTags } from '/assets/download/downloads.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 const { t } = AmI18n;
 
 export const bodyClass = 'mv-body';
@@ -182,9 +183,9 @@ export function mount({ root, url, signal, player: music, onLangChange }) {
       if (!post) url.searchParams.set('include', 'albums,artists');
       const l = await AmI18n.catalogLang(country);
       if (l) url.searchParams.set('l', l);
-      let res = await fetch(url, { signal });
+      let res = await ampFetch(url, { signal });
       // 语言参数被拒绝时去掉 l，改用地区默认语言
-      if (res.status === 400 && url.searchParams.has('l')) { url.searchParams.delete('l'); res = await fetch(url, { signal }); }
+      if (res.status === 400 && url.searchParams.has('l')) { url.searchParams.delete('l'); res = await ampFetch(url, { signal }); }
       if (!res.ok) return;
       const data = (await res.json()).data?.[0];
       const item = data?.attributes;

@@ -25,6 +25,7 @@ import { formatPath, formatName, fitFolder, fitFile, appendMediaExtension, strip
 import { ttmlToLrc } from '../lyrics/lrc.mjs';
 import { parseMaster, pickMvVideo, pickMvAudio, mvQualityVars } from '../mv/hls.mjs';
 import { createFragmentScanner, tagValue, DEFECTS } from '../alac-check.mjs';
+import { ampFetch } from '../amp-fetch.mjs';
 
 const { AmDecrypt, AmWrapper, AmI18n } = window;
 const t = (key, vars) => AmI18n.t(key, vars);
@@ -34,11 +35,11 @@ const encoder = new TextEncoder();
 async function amp(path, params) {
   const url = new URL('/amp' + path, location.origin);
   for (const [key, value] of Object.entries(params || {})) if (value !== undefined && value !== '') url.searchParams.set(key, value);
-  let res = await fetch(url);
+  let res = await ampFetch(url);
   // 地区不支持该语言时去掉 l
   if (res.status === 400 && url.searchParams.has('l')) {
     url.searchParams.delete('l');
-    res = await fetch(url);
+    res = await ampFetch(url);
   }
   const data = await res.json().catch(() => null);
   if (!res.ok || !data) throw new Error((data && ((data.errors && data.errors[0] && data.errors[0].detail) || data.msg)) || `HTTP ${res.status}`);

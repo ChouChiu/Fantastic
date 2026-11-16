@@ -304,7 +304,7 @@
   const FAIL_TTL = 10 * 60 * 1000;
 
   /** 某首歌（地区 country 的 adam id）的分析：Promise<分析 | null>，取不到或没有响度曲线时为 null */
-  function fetchAnalysis(track, country = 'us', fetchImpl = global.fetch) {
+  function fetchAnalysis(track, country = 'us', fetchImpl = global.ampFetch || global.fetch) {
     const key = `${country}:${track}`;
     const hit = cache.get(key);
     if (hit && (!hit.failedAt || Date.now() - hit.failedAt < FAIL_TTL)) {
