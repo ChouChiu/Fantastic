@@ -1,10 +1,9 @@
 /*
- * /amp（Apple Music API 代理）请求的统一入口：限速 + 自动重试。
+ * /amp（Apple Music 官方 API 代理）请求的统一入口：自动重试。
+ * 不限速（请求的是 Apple 官方接口；wrapper-lite 和 QQ 源的限速在各自那边）。
  *
  * 用法和 fetch 一样，返回 Response，调用方原有的 res.json()、状态码判断都不用改。
  *
- * 限速：同时最多 MAX_ACTIVE 个请求，其余排队；收到 429 时全局暂停（按 Retry-After，没有就用退避时间），
- *       暂停期间新请求也一起等。
  * 重试（最多 RETRIES 次，指数退避加抖动）：
  *   - 网络错误（fetch 抛 TypeError）
  *   - 429、502、503、504
@@ -14,15 +13,10 @@
  * 也挂在 globalThis.ampFetch 上，给 i18n.js、automix.js 这类非模块脚本用。
  */
 
-const MAX_ACTIVE = 4;
 const RETRIES = 3;
 const BASE_DELAY = 500;
 const MAX_DELAY = 8000;
 const RETRY_STATUS = new Set([429, 502, 503, 504]);
-
-let active = 0;
-const waiting = [];
-let pausedUntil = 0;
 
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   if (ms <= 0) return resolve();
@@ -31,31 +25,6 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
   if (signal) signal.addEventListener('abort', onAbort, { once: true });
 });
-
-async function acquire(signal) {
-  if (active >= MAX_ACTIVE) {
-    await new Promise((resolve, reject) => {
-      const entry = { resolve, reject };
-      waiting.push(entry);
-      if (signal) signal.addEventListener('abort', () => {
-        const i = waiting.indexOf(entry);
-        if (i >= 0) { waiting.splice(i, 1); reject(signal.reason); }
-      }, { once: true });
-    });
-  } else {
-    active++;
-  }
-  // 429 之后的全局暂停
-  while (Date.now() < pausedUntil) {
-    try { await sleep(pausedUntil - Date.now(), signal); } catch (err) { release(); throw err; }
-  }
-}
-
-function release() {
-  const next = waiting.shift();
-  if (next) next.resolve(); // 名额直接交给下一个，active 不变
-  else active--;
-}
 
 function backoff(attempt) {
   const ms = Math.min(MAX_DELAY, BASE_DELAY * 2 ** attempt);
@@ -77,7 +46,6 @@ export async function ampFetch(input, init) {
   const signal = init && init.signal;
   for (let attempt = 0; ; attempt++) {
     const last = attempt >= RETRIES;
-    await acquire(signal);
     let res;
     let text = null;
     try {
@@ -85,12 +53,10 @@ export async function ampFetch(input, init) {
       // 200 也要先读完响应体：读到一半断开、空响应、非 JSON 都算失败
       if (res.ok && res.status !== 204) text = await res.text();
     } catch (err) {
-      release();
       if (isAbort(err) || (signal && signal.aborted) || last) throw err;
       await sleep(backoff(attempt), signal);
       continue;
     }
-    release();
 
     if (text !== null) {
       let valid = false;
@@ -101,7 +67,6 @@ export async function ampFetch(input, init) {
     }
     if (!RETRY_STATUS.has(res.status) || last) return res;
     const wait = Math.max(retryAfter(res), backoff(attempt));
-    if (res.status === 429) pausedUntil = Math.max(pausedUntil, Date.now() + wait);
     res.body && res.body.cancel().catch(() => {});
     await sleep(wait, signal);
   }

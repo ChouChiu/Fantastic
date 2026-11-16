@@ -1,4 +1,4 @@
-// web/amp-fetch.mjs：/amp 请求的限速与自动重试
+// web/amp-fetch.mjs：/amp 请求的自动重试
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ampFetch } from '../../web/amp-fetch.mjs';
@@ -44,18 +44,6 @@ test('重试次数用完后返回最后一次结果', async () => {
   assert.equal(res.status, 200);
   assert.equal(await res.json().catch(() => null), null);
   assert.equal(calls.length, 4);
-});
-
-test('同时最多 4 个请求', async () => {
-  let active = 0, peak = 0;
-  globalThis.fetch = async () => {
-    active++; peak = Math.max(peak, active);
-    await new Promise((r) => setTimeout(r, 20));
-    active--;
-    return json('{}');
-  };
-  await Promise.all(Array.from({ length: 10 }, (_, i) => ampFetch(`http://x/amp/v1/e${i}`)));
-  assert.equal(peak, 4);
 });
 
 test('中止的请求不重试', async () => {
