@@ -2351,7 +2351,14 @@ async fn lyrics_cache_hits_revalidate_without_waiting_or_downgrading() {
             }
             release.add_permits(16);
             wait_for_lyrics_revalidation(qq, "revalidate").await;
-            assert_eq!(calls.load(Ordering::SeqCst), if mode == "context" { 4 } else { 3 }, "{mode}: {endpoint}");
+            // QQ API 返回 5xx 时一次请求内会重试 2 次（共 3 次）；AMLL 源（/v1/lyrics/get）不重试
+            let expected = match mode {
+                "failed" => 7,  // /lyric/ttml、/lyric/new 各 3 次
+                "partial" => 5, // /lyric/ttml 3 次
+                "context" => 6, // /extra/music/info 3 次
+                _ => 3,
+            };
+            assert_eq!(calls.load(Ordering::SeqCst), expected, "{mode}: {endpoint}");
             let (new_expires, fresh) = qq.lyrics.entries.lock().unwrap().peek("revalidate").unwrap().clone();
             match mode {
                 "changed" => {
@@ -2470,9 +2477,9 @@ async fn quality_probes_are_bounded_and_cache_negative_results() {
     config.qq_api = Some(base);
     let state = Arc::new(AppState::with_config(config));
     let qq = state.qq.as_ref().unwrap();
-    assert!(qq.probe_audio_url("retry", Quality::Nac).await.is_err());
-    assert!(qq.audio_failures.get(&Quality::Nac.cache_key("retry")).is_none());
+    // 一次 503 在请求内自动重试，第二次成功；失败不进入负缓存
     assert!(qq.probe_audio_url("retry", Quality::Nac).await.is_ok());
+    assert!(qq.audio_failures.get(&Quality::Nac.cache_key("retry")).is_none());
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     task.abort();
 }

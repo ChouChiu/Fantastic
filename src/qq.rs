@@ -49,6 +49,12 @@ fn network(error: reqwest::Error) -> QqError {
     unavailable()
 }
 
+/// QQ 上游 API 的限速：任意 1 秒内最多发出的请求数（各用户共用）
+const QQ_RATE_PER_SECOND: usize = 10;
+/// 网络错误、响应解析失败、429 或 5xx 时的重试次数
+const QQ_RETRIES: u32 = 2;
+const QQ_RETRY_BASE: Duration = Duration::from_millis(300);
+
 enum RequestError {
     Upstream(StatusCode),
     Network,
@@ -203,6 +209,7 @@ pub struct Qq {
     media: reqwest::Client,
     cover: reqwest::Client,
     permits: tokio::sync::Semaphore,
+    rate: crate::wrapper::RateLimit,
     probe_permits: tokio::sync::Semaphore,
     searches: Cache<SearchResult>,
     suggestions: Cache<Suggestions>,
@@ -259,6 +266,7 @@ impl Qq {
                 .build()
                 .map_err(|e| format!("QQ cover client: {}", e.without_url()))?,
             permits: tokio::sync::Semaphore::new(8),
+            rate: crate::wrapper::RateLimit::new(QQ_RATE_PER_SECOND),
             probe_permits: tokio::sync::Semaphore::new(3),
             searches: Cache::new(128, 600),
             suggestions: Cache::new(256, 600),
@@ -276,11 +284,38 @@ impl Qq {
         path: &str,
         params: &[(&str, String)],
     ) -> Result<Value, RequestError> {
+        let mut attempt = 0;
+        loop {
+            let result = self.request_once(path, params).await;
+            let retryable = match &result {
+                Ok(_) => false,
+                Err(RequestError::Network | RequestError::Decode) => true,
+                Err(RequestError::Upstream(status)) => {
+                    *status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+                }
+            };
+            if !retryable || attempt >= QQ_RETRIES {
+                return result;
+            }
+            // 退避时不占并发名额：300ms、600ms
+            tokio::time::sleep(QQ_RETRY_BASE * 2u32.pow(attempt)).await;
+            attempt += 1;
+            tracing::debug!(path, attempt, "retrying qq upstream request");
+        }
+    }
+
+    /// 一次上游请求：先取并发名额（同时最多 8 个），再按滑动窗口占速率配额（任意 1 秒内最多 QQ_RATE_PER_SECOND 个）
+    async fn request_once(
+        &self,
+        path: &str,
+        params: &[(&str, String)],
+    ) -> Result<Value, RequestError> {
         let _permit = self
             .permits
             .acquire()
             .await
             .map_err(|_| RequestError::Network)?;
+        self.rate.acquire().await;
         let response = self
             .api
             .get(format!("{}{path}", self.base))

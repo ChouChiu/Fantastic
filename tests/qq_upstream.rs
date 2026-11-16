@@ -274,7 +274,8 @@ async fn lyrics_use_source_priority_and_cache_partial_failures() {
     let calls = calls.lock().unwrap();
     assert_eq!(calls["/v1/lyrics/get"], 1);
     assert_eq!(calls["/lyric/ttml"], 1);
-    assert_eq!(calls["/lyric/new"], 1);
+    // QQ API 的 5xx 在一次请求内会重试 2 次（共 3 次），第二次请求仍由缓存提供
+    assert_eq!(calls["/lyric/new"], 3);
     assert_eq!(calls["/extra/music/info"], 1);
     task.abort();
 }

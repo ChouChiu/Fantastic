@@ -348,18 +348,18 @@ impl QueueSnapshot {
 
 /// 滑动窗口限速：任意 1 秒内最多发出 `per_second` 个请求（不像令牌桶那样允许窗口边界处翻倍突发）。
 /// 等待者按到达顺序排队。
-struct RateLimit {
+pub(crate) struct RateLimit {
     per_second: usize,
     sent: Mutex<VecDeque<Instant>>,
 }
 
 impl RateLimit {
-    fn new(per_second: usize) -> Self {
+    pub(crate) fn new(per_second: usize) -> Self {
         Self { per_second, sent: Mutex::new(VecDeque::with_capacity(per_second)) }
     }
 
     /// 返回占用配额的时间（即请求发出的时间）
-    async fn acquire(&self) -> Instant {
+    pub(crate) async fn acquire(&self) -> Instant {
         let mut sent = self.sent.lock().await;
         let now = Instant::now();
         while sent.front().is_some_and(|t| now.duration_since(*t) >= RATE_WINDOW) {
