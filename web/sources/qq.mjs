@@ -350,10 +350,12 @@ export function lyricLines(result) {
   return (result?.song?.lines || []).filter((line) => typeof line.text === 'string' && line.text.trim())
     .map((line) => ({ text: line.text, translation: line.translation || '' }));
 }
-export const LYRIC_PRIORITY = ['amll', 'ttml', 'qrc', 'lrc'];
+/** 默认用 QQ 自己的逐字 QRC；歌词来源选了 AMLL 歌词库时 AMLL 优先 */
+export const LYRIC_PRIORITY = ['qrc', 'ttml', 'lrc', 'amll'];
+export const AMLL_LYRIC_PRIORITY = ['amll', 'qrc', 'ttml', 'lrc'];
 // Try the next source if a candidate is empty, malformed or has no timed lines.
-export function selectLyrics(candidates, parse) {
-  for (const source of LYRIC_PRIORITY) {
+export function selectLyrics(candidates, parse, prefer) {
+  for (const source of prefer === 'amll' ? AMLL_LYRIC_PRIORITY : LYRIC_PRIORITY) {
     for (const candidate of candidates || []) {
       if (candidate.source !== source || typeof candidate.text !== 'string' || !candidate.text.trim()) continue;
       try {
@@ -364,9 +366,9 @@ export function selectLyrics(candidates, parse) {
   }
   return { song: null };
 }
-export async function lyrics(id, parse, signal) {
+export async function lyrics(id, parse, signal, prefer) {
   const data = await request(`/qq/song/${mid(id)}/lyrics`, signal);
-  return { ...selectLyrics(data.candidates, parse),
+  return { ...selectLyrics(data.candidates, parse, prefer),
     rawQrc: data.rawQrc === true, rawTrans: data.rawTrans === true, rawRoma: data.rawRoma === true };
 }
 export function download(track, quality) {
