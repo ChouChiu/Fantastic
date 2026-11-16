@@ -171,9 +171,10 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
     return node;
   }
 
-  /** amp-api 的 artwork.url 是 {w}x{h}{c}.{f} 模板 */
+  /** amp-api 的 artwork.url 是 {w}x{h}{c}.{f} 模板；QQ 专辑 / 艺人 / 歌单 / MV 的 cover、avatar 是已定尺寸的字符串 */
   function artUrl(artwork, w, h) {
-    return artwork && artwork.url ? artwork.url.replace('{w}', w).replace('{h}', h).replace('{c}', 'bb').replace('{f}', 'jpg') : '';
+    const url = typeof artwork === 'string' ? artwork : artwork?.url;
+    return url ? url.replace('{w}', w).replace('{h}', h).replace('{c}', 'bb').replace('{f}', 'jpg') : '';
   }
 
   function artNode(className, src) {
