@@ -2,11 +2,22 @@
 
 ## Unreleased
 
+## v0.7.1 (2026-11-17)
 ### Added
 - ✨ A language picker with Simplified and Taiwan Traditional Chinese, migration of saved Simplified Chinese preferences, and script-aware lyric localization and replacement handling.
 - ✨ Optional QQ music source configuration (`--qq-api` / `FANTASTIC_QQ_API` and `--qq-proxy` / `FANTASTIC_QQ_PROXY`), static quality capabilities and lyrics fallbacks.
 - ✨ A "CJK–Latin spacing" lyrics option (on by default) that automatically adjusts spacing between CJK and Latin text.
 - ✨ "Sound Output" (Speaker / Bluetooth) and "Lyrics Lead" lyrics options: shift full-screen lyric timing in 10 ms steps (within ±2 s) to compensate for phones playing sound later than the reported position; Speaker and Bluetooth each remember their own value.
+
+
+### New
+- ✨ Redesigned home page laid out like music.apple.com/{cc}/search: the search box on top, then recent searches and **Browse Categories**, the same category bricks as the official search page (genres, moods, decades, Charts, Music Videos, featured collections). They follow the primary storefront and catalog language, with a storefront button next to the title. Bricks open curator, grouping, multi-room and chart pages in app; everything else links to Apple Music. Only the first row shows at first; **Show all** expands the rest and is remembered. New server route `GET /amp/v1/recommendations/<cc>` (also in the serverless deployment)
+- ✨ New home footer: the running am-hook version (click for that release's notes), GitHub, Telegram group and issue links, and credits. The version reaches the page through `host.js`
+- ✨ Motion artwork downloads: albums and playlists can save their square / tall motion artwork (MP4) from the download dialog, with settings for the default, codec (HEVC / H.264) and maximum resolution
+- ✨ Save-artwork menu: right-click or long-press any cover (detail headers, cards, search results, player bar, artist header) to save the still cover (original or sized, JPG / PNG) or the motion artwork in any quality, with bitrate and estimated size; Shift+right-click keeps the browser menu
+- ✨ Installable app (PWA): web app manifest with icons in every size and a title bar colour per colour scheme
+- ✨ The station media-user-token is kept in an HttpOnly cookie; the page only remembers its last six characters. Scripts can still send `X-Media-User-Token`
+- ✨ LAN / loopback wrapper-lite supports Chrome's Local Network Access permission: while it is still undecided the page doesn't contact the wrapper on load, "Save and check" asks for it, and a denied permission gets its own message
 
 ### Fixes
 - 🐛 Refine only consecutive single-Han fallback lyric segments with frequency-based Jieba/cutword segmentation (HMM disabled), preserving existing multi-character cjdict words, then attach postpositions such as 之外 and 之间 to preceding Han text. Japanese and Korean segmentation is unchanged.
@@ -19,19 +30,6 @@
 - 🐛 Full-screen lyric word animations are realigned to playback once they start, fixing whole lines of word animations lagging behind the sound on phones when the line-change frame is slow.
 - 🐛 The translation / pronunciation switches in the lyrics options are saved in the browser and no longer reset on reload.
 - 🐛 Online lyrics use the "Lyrics language" setting; when empty, a Chinese UI (Simplified or Traditional) requests Simplified Chinese translations, which were missing when the account storefront (e.g. ca) does not list Chinese.
-
-## v0.7.1 (2026-11-15)
-
-### New
-- ✨ Redesigned home page laid out like music.apple.com/{cc}/search: the search box on top, then recent searches and **Browse Categories**, the same category bricks as the official search page (genres, moods, decades, Charts, Music Videos, featured collections). They follow the primary storefront and catalog language, with a storefront button next to the title. Bricks open curator, grouping, multi-room and chart pages in app; everything else links to Apple Music. Only the first row shows at first; **Show all** expands the rest and is remembered. New server route `GET /amp/v1/recommendations/<cc>` (also in the serverless deployment)
-- ✨ New home footer: the running am-hook version (click for that release's notes), GitHub, Telegram group and issue links, and credits. The version reaches the page through `host.js`
-- ✨ Motion artwork downloads: albums and playlists can save their square / tall motion artwork (MP4) from the download dialog, with settings for the default, codec (HEVC / H.264) and maximum resolution
-- ✨ Save-artwork menu: right-click or long-press any cover (detail headers, cards, search results, player bar, artist header) to save the still cover (original or sized, JPG / PNG) or the motion artwork in any quality, with bitrate and estimated size; Shift+right-click keeps the browser menu
-- ✨ Installable app (PWA): web app manifest with icons in every size and a title bar colour per colour scheme
-- ✨ The station media-user-token is kept in an HttpOnly cookie; the page only remembers its last six characters. Scripts can still send `X-Media-User-Token`
-- ✨ LAN / loopback wrapper-lite supports Chrome's Local Network Access permission: while it is still undecided the page doesn't contact the wrapper on load, "Save and check" asks for it, and a denied permission gets its own message
-
-### Fixes
 - 🐛 AutoMix stopped after one song with Android Chrome in the background: Chrome pauses a hidden page's media element at volume 0, so transition gains now stay at or above -60 dB
 - 🐛 The 中文网字计划 font catalog showed tiny previews and requested all of them at once, so the CDN answered 429: previews are now full-width, load when scrolled near, four at a time, and back off together on failure
 - 🐛 With many custom fonts the lyrics options menu went off the top of the screen on phones: its height is capped and it scrolls
