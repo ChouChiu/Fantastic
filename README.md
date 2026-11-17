@@ -21,6 +21,8 @@ Fantastic is a music web player written in Rust that puts **Apple Music** and **
 
 Live demo: <https://music.1412.tech>
 
+QQ page URLs use the site origin followed by the original link, for example `/https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV`. Apple Music links without a storefront probe wrapper-lite regions in their reported order, falling back to CN, US, KR, JP and TW only when status is unavailable or reports no valid regions.
+
 ## Highlights
 
 **Shared**
