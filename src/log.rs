@@ -297,6 +297,13 @@ pub fn print_banner(listen: SocketAddr, config: &Config) {
             None => "none".to_owned(),
         };
         lines.push(format!("                limit {limits} · auth {auth}"));
+        if let Some(fallback) = &config.wrapper_fallback {
+            let address = reqwest::Url::parse(&fallback.url).map(|url| url.origin().ascii_serialization()).unwrap_or_else(|_| "invalid URL".into());
+            lines.push(format!("  fallback      {address}"));
+            let limits = format!("{}, {}", limit(fallback.rate as usize, "req/s"), limit(fallback.concurrency, "concurrent"));
+            let auth = if fallback.auth.is_some() { "configured" } else { "none" };
+            lines.push(format!("                limit {limits} · auth {auth}"));
+        }
         if config.client_rate > 0 || config.client_concurrency > 0 {
             let source = config.client_ip_header.as_deref().unwrap_or("peer address");
             let per_client = format!("{}, {}", limit(config.client_rate as usize, "req/min"), limit(config.client_concurrency, "concurrent"));
@@ -359,14 +366,7 @@ fn lan_ip() -> Option<IpAddr> {
 pub async fn check_wrapper(state: Arc<AppState>) {
     let wrapper = &state.wrapper;
     let wrapper_url = &wrapper.url;
-    let result = wrapper.send(wrapper.get("/status").timeout(Duration::from_secs(5))).await.map_err(|e| e.to_string());
-    let value = match result {
-        Ok(reply) => match reply.status.as_u16() {
-            401 | 403 => Err(format!("HTTP {} (check --wrapper-auth)", reply.status)),
-            _ => reply.json::<serde_json::Value>().map_err(|e| format!("invalid response: {e}")),
-        },
-        Err(e) => Err(e),
-    };
+    let value = wrapper.fetch_status(Duration::from_secs(5)).await;
     match value {
         Ok(v) if v.get("code").and_then(serde_json::Value::as_i64) == Some(0) => {
             info!("wrapper-lite online · regions {}", regions_summary(&v));

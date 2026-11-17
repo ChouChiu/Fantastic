@@ -443,7 +443,15 @@ function normalizeAuthorization(raw) {
 
 /** 环境变量里的 wrapper-lite：没有设置地址时为 null。地址中的用户信息改为 Basic 认证（fetch 不接受带用户信息的地址） */
 export function wrapperConfig(env) {
-  const raw = String(env?.FANTASTIC_WRAPPER_URL ?? '').trim().replace(/\/+$/, '');
+  const primary = wrapperEndpoint(env?.FANTASTIC_WRAPPER_URL, env?.FANTASTIC_WRAPPER_AUTH);
+  if (!primary) return null;
+  const fallback = wrapperEndpoint(env?.FANTASTIC_WRAPPER_FALLBACK_URL, env?.FANTASTIC_WRAPPER_FALLBACK_AUTH);
+  if (fallback) primary.fallback = fallback;
+  return primary;
+}
+
+function wrapperEndpoint(rawUrl, auth) {
+  const raw = String(rawUrl ?? '').trim().replace(/\/+$/, '');
   if (!raw) return null;
   let base = raw;
   let basic = '';
@@ -458,17 +466,33 @@ export function wrapperConfig(env) {
     }
   } catch {}
   // 单独设置的 Authorization 优先于地址中的用户信息
-  return { base, auth: normalizeAuthorization(env.FANTASTIC_WRAPPER_AUTH) || basic };
+  return { base, auth: normalizeAuthorization(auth) || basic };
 }
 
 const query = (params) => new URLSearchParams(params).toString();
 
-async function wrapperSend(wrapper, path, { method = 'GET', body, timeout = WRAPPER_TIMEOUT } = {}) {
+async function wrapperSendOnce(wrapper, path, { method = 'GET', body, timeout = WRAPPER_TIMEOUT } = {}) {
   const headers = {};
   if (wrapper.auth) headers.authorization = wrapper.auth;
   if (body !== undefined) headers['content-type'] = 'application/json';
   const res = await fetch(wrapper.base + path, { method, headers, body, signal: AbortSignal.timeout(timeout) });
   return { status: res.status, ok: res.ok, text: await res.text() };
+}
+
+async function wrapperSend(wrapper, path, options) {
+  const send = (endpoint) => wrapperSendOnce(endpoint, path, options);
+  let reply;
+  try {
+    reply = await send(wrapper);
+  } catch (error) {
+    if (!wrapper.fallback) throw error;
+    return send(wrapper.fallback);
+  }
+  const code = parse(reply.text)?.code;
+  // 没有歌词是正常结果，不额外消耗公益服额度
+  const noLyrics = path.split('?')[0] === '/lyrics' && (reply.status === 404 || (reply.ok && code === 404));
+  if (wrapper.fallback && !noLyrics && (!reply.ok || code !== 0)) return send(wrapper.fallback);
+  return reply;
 }
 
 function parse(text) {
@@ -490,16 +514,20 @@ async function wrapperData(wrapper, path) {
 }
 
 async function status(wrapper) {
-  try {
-    const value = parse((await wrapperSend(wrapper, '/status')).text);
-    if (value?.code === 0) {
-      return json(200, {
-        code: 0,
-        msg: typeof value.msg === 'string' ? value.msg : 'SUCCESS',
-        regions: value.data?.regions ?? [],
-      });
-    }
-  } catch {}
+  // 并行查询，合并时仍按主服、备用的顺序；不让单边故障丢掉另一边的地区
+  const values = await Promise.all([wrapper, wrapper.fallback].filter(Boolean).map(async (endpoint) => {
+    try {
+      const reply = await wrapperSendOnce(endpoint, '/status');
+      const value = parse(reply.text);
+      return reply.ok && value?.code === 0 ? value : null;
+    } catch { return null; }
+  }));
+  const value = values.find(Boolean);
+  if (value) {
+    const regions = [...new Set(values.flatMap((v) => Array.isArray(v?.data?.regions) ? v.data.regions : [])
+      .filter((cc) => typeof cc === 'string').map((cc) => cc.toLowerCase()).filter((cc) => /^[a-z]{2}$/.test(cc)))];
+    return json(200, { code: 0, msg: typeof value.msg === 'string' ? value.msg : 'SUCCESS', regions });
+  }
   return json(502, { code: 1, msg: 'wrapper-lite unavailable', regions: [] });
 }
 
