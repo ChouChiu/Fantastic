@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 🐛 Update the bundled AMLL lyric core to fork master `b02c59e`: break rewards now recognize trailing whitespace on word elements, so mixed Korean/Chinese–Latin lines break at script boundaries in dynamic lyrics too (the cross-script reward could never fire when spaces were glued to words).
 - 🔄 Update the bundled AMLL lyric core to fork master `283a27e`, merging upstream PR #639's balanced line breaking for mixed Chinese–Latin lyrics.
 
 ## v0.7.1 (2026-11-17)
