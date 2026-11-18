@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 🔄 Update the bundled AMLL lyric core to fork master `283a27e`, merging upstream PR #639's balanced line breaking for mixed Chinese–Latin lyrics.
+
 ## v0.7.1 (2026-11-17)
 ### Added
 - ✨ A language picker with Simplified and Taiwan Traditional Chinese, migration of saved Simplified Chinese preferences, and script-aware lyric localization and replacement handling.
