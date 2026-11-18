@@ -14,7 +14,7 @@ and copies the package stylesheet to `web/lyrics/amll.css`. Its dependencies are
 `pixi-stub.mjs` replaces Pixi's imports, so nothing from Pixi ends up in the bundle.
 
 `VERSION` records both the package version and the exact AMLL source revision as
-`<package-version>+git.<short-commit>`, currently `0.6.0+git.ce5d87b`. The installed core's
+`<package-version>+git.<short-commit>`, currently `0.6.0+git.283a27e`. The installed core's
 `package.json` version must match the part before `+`; the source commit is recorded in the
 generated JavaScript and CSS banners.
 
@@ -22,7 +22,7 @@ To rebuild from the pinned AMLL source:
 
     git clone --branch master https://github.com/kid141252010/applemusic-like-lyrics.git
     cd applemusic-like-lyrics
-    git checkout ce5d87b12e76f7d2b796c0d000c2d9bb70ea7f6d
+    git checkout 283a27e13c922c5c38a5978f51d64023ec59ae8b
     rm -rf packages/core/dist
     rm -f packages/core/*.tgz
     pnpm install --filter @applemusic-like-lyrics/core
