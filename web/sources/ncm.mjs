@@ -1,6 +1,7 @@
 // Native NetEase adapter. Account cookies stay in the server jar.
 import { withIdentity } from './track.mjs';
 import { playbackQualityChain } from '../playback-quality.mjs';
+import { selectLyrics as selectCandidates } from '../lyrics/candidates.mjs';
 export { trackKey } from './track.mjs';
 export const enabled = () => globalThis.window?.FANTASTIC_HOST?.ncmEnabled === true;
 export function numericId(value) {
@@ -188,14 +189,10 @@ export function parseLrc(text) {
   lines.forEach((l, i) => { l.end = lines[i + 1]?.begin ?? l.begin + 5000; });
   return model(lines, 'Line');
 }
-export const LYRIC_PRIORITY = ['yrc', 'lrc'];
-export function selectLyrics(candidates) {
-  for (const source of LYRIC_PRIORITY) for (const candidate of candidates || []) {
-    if (candidate.source !== source || typeof candidate.text !== 'string') continue;
-    const song = source === 'yrc' ? parseYrc(candidate.text) : parseLrc(candidate.text);
-    if (song.lines.length) return { source, text: candidate.text, song, authors: [], amllStatus: null };
-  }
-  return { song: null };
+export const LYRIC_PRIORITY = ['amll', 'yrc', 'lrc'];
+export function selectLyrics(candidates, parse) {
+  return selectCandidates(candidates, (text, source) => source === 'amll' ? parse(text)
+    : source === 'yrc' ? parseYrc(text) : parseLrc(text), LYRIC_PRIORITY);
 }
 /** Attach secondary lyrics by line timestamps; translated text never becomes a main candidate. */
 export function attachLyrics(song, { trans = '', roma = '', yroma = '' } = {}) {
@@ -213,14 +210,14 @@ export function attachLyrics(song, { trans = '', roma = '', yroma = '' } = {}) {
   return song;
 }
 export const lyricLines = (result) => (result?.song?.lines || []).map((l) => ({ text: l.text, translation: l.translation || '' }));
-export async function lyrics(id, _parse, signal) {
+export async function lyrics(id, parse, signal) {
   const data = await request(`/ncm/song/${numericId(id)}/lyrics`, signal);
-  const result = selectLyrics(data.candidates);
+  const result = selectLyrics(data.candidates, parse);
   if (result.song) {
     const raw = async (kind) => { const r = await fetch(rawLyricsUrl(id, kind), { signal }); if (r.status === 404) return ''; if (!r.ok) throw new Error(`NCM HTTP ${r.status}`); return r.text(); };
     const optional = (kind, present) => present ? raw(kind).catch((e) => { if (e.name === 'AbortError') throw e; return ''; }) : '';
     const [trans, roma, yroma] = await Promise.all([optional('trans', data.rawTrans), optional('roma', data.rawRoma), optional('yroma', data.rawRoma)]);
-    attachLyrics(result.song, { trans, roma, yroma });
+    if (result.source !== 'amll') attachLyrics(result.song, { trans, roma, yroma });
     result.rawRomaKind = roma ? 'roma' : yroma ? 'yroma' : 'roma';
   }
   return { ...result, rawYrc: data.rawYrc === true, rawLrc: (data.candidates || []).some((c) => c.source === 'lrc'), rawTrans: data.rawTrans === true, rawRoma: data.rawRoma === true };

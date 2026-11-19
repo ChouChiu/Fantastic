@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { document, ids } from '../support/ui-dom.mjs';
 import { mount } from '../../web/views/ncm-song.mjs';
-import { mountNcmSettings } from '../../web/views/settings-ncm.mjs';
 const settle = () => new Promise(setImmediate);
 function browser(t) {
   const saved = Object.fromEntries(['document','window','matchMedia','fetch','MediaSource','localStorage'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
@@ -47,46 +46,12 @@ test('NCM song renders quality groups, plays/enqueues NCM identity and downloads
   rerender(); assert.equal(root.querySelector('#lyrics-lines').textContent, '海阔天空');
 });
 
-test('cookie settings show server status, send only PUT bodies, clear inputs and never render the secret', async (t) => {
-  const signal = browser(t);
-  const root = ids('general'); const calls = []; const notifications = [];
-  let configured = false, render;
-  globalThis.fetch = async (path, options) => {
-    calls.push({ path, options });
-    if (path.endsWith('/status')) return { ok: true, json: async () => ({ configured }) };
-    configured = options.method === 'PUT'; return { ok: true, status: 204 };
-  };
-  mountNcmSettings({ root, signal, onLangChange: (fn) => { render = fn; }, toast: (text) => notifications.push(text) });
-  await settle();
-  const input = root.querySelector('#ncm-cookie-input');
-  assert.equal(input.type, 'password'); assert.equal(input.autocomplete, 'off');
-  assert.equal(root.querySelector('#ncm-cookie-status').textContent, 'ncm.notConfigured');
-  input.value = 'MUSIC_U=private-session';
-  await root.querySelector('#ncm-cookie-save').click();
-  assert.equal(input.value, ''); assert.equal(root.querySelector('#ncm-cookie-status').textContent, 'ncm.configured');
-  const put = calls.find((c) => c.options.method === 'PUT');
-  assert.deepEqual(JSON.parse(put.options.body), { cookie: 'MUSIC_U=private-session' });
-  assert.equal(put.path, '/ncm/cookie'); assert.equal(put.options.signal, signal);
-  assert.equal(root.textContent.includes('private-session'), false);
-  render(); assert.equal(root.querySelector('#ncm-cookie-status').textContent, 'ncm.configured');
-  await root.querySelector('#ncm-cookie-clear').click();
-  assert.equal(calls.find((c) => c.options.method === 'DELETE').options.body, undefined);
-  assert.equal(root.querySelector('#ncm-cookie-status').textContent, 'ncm.notConfigured');
-  assert.deepEqual(notifications, ['ncm.cookieSaved','ncm.cookieCleared']);
-});
-
-test('NCM settings honor the host gate and expose a useful missing-file configuration error', async (t) => {
-  const signal = browser(t); const root = ids('general');
-  window.FANTASTIC_HOST.ncmEnabled = false;
-  globalThis.fetch = () => assert.fail('disabled NCM must not fetch cookie status');
-  assert.equal(mountNcmSettings({ root, signal, onLangChange() {} }), undefined);
-  assert.equal(root.querySelector('#general').children.length, 0);
-  window.FANTASTIC_HOST.ncmEnabled = true;
-  globalThis.fetch = async (path) => path.endsWith('/status') ? { ok: true, json: async () => ({ configured: false }) } : { ok: false, status: 503 };
-  mountNcmSettings({ root, signal, onLangChange() {} }); await settle();
-  await root.querySelector('#ncm-cookie-save').click();
-  assert.equal(root.querySelector('#ncm-cookie-status').textContent, 'ncm.cookieUnavailable');
-  assert.equal(root.querySelector('#ncm-cookie-clear').disabled, false);
+test('settings contain no cookie controls or requests', async () => {
+  const { readFileSync } = await import('node:fs');
+  for (const ext of ['html', 'mjs', 'css']) {
+    const source = readFileSync(new URL(`../../web/views/settings.${ext}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /cookie|settings-ncm/i);
+  }
 });
 
 test('NCM album, artist and playlist render local navigation and play source-specific queues', async (t) => {

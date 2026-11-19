@@ -8,8 +8,167 @@ use clap::{CommandFactory, FromArgMatches};
 use tower::ServiceExt;
 
 fn ncm() -> Ncm {
-    Ncm::new(None).unwrap()
+    Ncm::new(None, "https://api.amll.dev").unwrap()
 }
+
+fn native_lyrics() -> Value {
+    json!({"code":200, "yrc":{"lyric":"[0,120](0,60)海(60,60)阔\n"},
+        "lrc":{"lyric":"[00:00.00]海阔天空\n"}, "tlyric":{"lyric":"[00:00.00]Broad sky\n"}})
+}
+
+#[test]
+fn amll_lyrics_precede_native_candidates_and_preserve_raw_downloads() {
+    let raw = native_lyrics();
+    let native = lyrics_dto(&raw);
+    let (lyrics, ttl) =
+        lyrics_from_sources(LyricsSource::Success("<tt>AMLL</tt>".into()), Ok(raw)).unwrap();
+    assert_eq!(
+        lyrics
+            .candidates
+            .iter()
+            .map(|c| c.source)
+            .collect::<Vec<_>>(),
+        ["amll", "yrc", "lrc"]
+    );
+    assert_eq!(lyrics.candidates[0].text, "<tt>AMLL</tt>");
+    assert_eq!(value(lyrics.clone())["rawYrc"], true);
+    assert_eq!(value(lyrics.clone())["rawTrans"], true);
+    assert_eq!(lyrics.raw.yrc, native.raw.yrc);
+    assert_eq!(lyrics.raw.lrc, native.raw.lrc);
+    assert_eq!(lyrics.raw.trans, native.raw.trans);
+    assert_eq!(ttl, 604800);
+}
+
+#[test]
+fn amll_missing_leaves_only_native_candidates() {
+    let (lyrics, ttl) = lyrics_from_sources(LyricsSource::None, Ok(native_lyrics())).unwrap();
+    assert_eq!(
+        lyrics
+            .candidates
+            .iter()
+            .map(|c| c.source)
+            .collect::<Vec<_>>(),
+        ["yrc", "lrc"]
+    );
+    assert_eq!(ttl, 604800);
+}
+
+#[test]
+fn lyrics_partial_failure_uses_qq_retry_ttl_and_keeps_available_candidates() {
+    let (lyrics, ttl) = lyrics_from_sources(LyricsSource::Failed, Ok(native_lyrics())).unwrap();
+    assert_eq!(
+        lyrics
+            .candidates
+            .iter()
+            .map(|c| c.source)
+            .collect::<Vec<_>>(),
+        ["yrc", "lrc"]
+    );
+    assert_eq!(ttl, crate::qq::LYRICS_RETRY_TTL.as_secs());
+    let (lyrics, ttl) = lyrics_from_sources(
+        LyricsSource::Success("<tt>AMLL</tt>".into()),
+        Err(unavailable()),
+    )
+    .unwrap();
+    assert_eq!(lyrics.candidates.len(), 1);
+    assert_eq!(lyrics.candidates[0].source, "amll");
+    assert!(!lyrics.raw_yrc);
+    assert_eq!(ttl, 300);
+    for (amll, new) in [
+        (LyricsSource::Failed, Ok(json!({"code":200}))),
+        (LyricsSource::None, Err(unavailable())),
+    ] {
+        let (lyrics, ttl) = lyrics_from_sources(amll, new).unwrap();
+        assert!(lyrics.candidates.is_empty());
+        assert_eq!(ttl, 300);
+    }
+}
+
+#[test]
+fn lyrics_all_empty_cache_one_hour_and_all_failed_return_502() {
+    for new in [Ok(json!({"code":200})), Err(missing())] {
+        let (lyrics, ttl) = lyrics_from_sources(LyricsSource::None, new).unwrap();
+        assert!(lyrics.candidates.is_empty());
+        assert_eq!(ttl, 3600);
+    }
+    assert_eq!(
+        lyrics_from_sources(LyricsSource::Failed, Err(unavailable()))
+            .err()
+            .unwrap()
+            .0,
+        StatusCode::BAD_GATEWAY
+    );
+}
+
+#[tokio::test]
+async fn amll_fetch_uses_ncm_music_id_and_handles_missing_and_failed_responses() {
+    use axum::routing::any;
+    let app = Router::new().route(
+        "/v1/lyrics/get",
+        any(|request: Request<Body>| async move {
+            assert_eq!(request.method(), axum::http::Method::GET);
+            assert!(!request.headers().contains_key(header::COOKIE));
+            match request.uri().query().unwrap_or_default() {
+                "ncmMusicId=1" => {
+                    Json(json!({"data":{"lyrics":"<tt><body><p begin=\"0\">AMLL</p></body></tt>"}}))
+                        .into_response()
+                }
+                "ncmMusicId=2" => StatusCode::NOT_FOUND.into_response(),
+                "ncmMusicId=3" => StatusCode::NO_CONTENT.into_response(),
+                "ncmMusicId=4" => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                "ncmMusicId=5" => "invalid json".into_response(),
+                "ncmMusicId=6" => Json(json!({"data":{}})).into_response(),
+                "ncmMusicId=7" => {
+                    Json(json!({"data":{"lyrics":"<!DOCTYPE tt><tt/>"}})).into_response()
+                }
+                other => panic!("unexpected AMLL query: {other}"),
+            }
+        }),
+    );
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(error) => {
+            if std::env::var("FANTASTIC_TEST_SKIP_LOOPBACK").as_deref() == Ok("1") {
+                eprintln!("skipping loopback NCM mock: {error}");
+                return;
+            }
+            panic!("loopback NCM mock bind failed: {error}; set FANTASTIC_TEST_SKIP_LOOPBACK=1 to skip");
+        }
+    };
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut config = AppState::new("http://localhost:12340".into()).config;
+    config.amll_api = base;
+    let state = AppState::with_sources(config, None, Some("private-session")).unwrap();
+    let amll = fetch_amll_lyrics(&state.ncm, "1").await;
+    let (lyrics, ttl) = lyrics_from_sources(amll, Ok(native_lyrics())).unwrap();
+    assert_eq!(lyrics.candidates[0].source, "amll");
+    assert_eq!(ttl, 604800);
+    for id in ["2", "3", "6", "7"] {
+        let amll = fetch_amll_lyrics(&state.ncm, id).await;
+        assert!(matches!(amll, LyricsSource::None));
+        let (lyrics, ttl) = lyrics_from_sources(amll, Ok(native_lyrics())).unwrap();
+        assert_eq!(
+            lyrics
+                .candidates
+                .iter()
+                .map(|c| c.source)
+                .collect::<Vec<_>>(),
+            ["yrc", "lrc"]
+        );
+        assert_eq!(ttl, 604800);
+    }
+    for id in ["4", "5"] {
+        let amll = fetch_amll_lyrics(&state.ncm, id).await;
+        assert!(matches!(amll, LyricsSource::Failed));
+        assert_eq!(
+            lyrics_from_sources(amll, Ok(native_lyrics())).unwrap().1,
+            300
+        );
+    }
+    task.abort();
+}
+
 fn value<T: Serialize>(data: T) -> Value {
     serde_json::to_value(data).unwrap()
 }
@@ -494,22 +653,44 @@ fn desktop_eapi_ua_matches_anonymous_appver() {
 }
 
 #[test]
-fn cookie_file_is_optional_private_and_invalid_content_is_redacted() {
-    assert!(Ncm::new(Some(FilePath::new("/nonexistent-ncm-cookie-file"))).is_ok());
-    let path = std::env::temp_dir().join(format!(
-        "fantastic-ncm-{}-{}.txt",
-        std::process::id(),
-        rand::random::<u64>()
-    ));
-    std::fs::write(&path, "MUSIC_U=private-session; __csrf=test-csrf; os=pc\n").unwrap();
-    let ncm = Ncm::new(Some(&path)).unwrap();
+fn cookie_accepts_full_string() {
+    let ncm = Ncm::new(
+        Some("  MUSIC_U=private-session; __csrf=test-csrf; os=pc\n"),
+        "https://api.amll.dev",
+    )
+    .unwrap();
     let cookies = ncm.cookies.values(&MUSIC.parse().unwrap());
     assert_eq!(cookies["MUSIC_U"], "private-session");
+    assert_eq!(cookies["__csrf"], "test-csrf");
     assert_eq!(cookies["os"], "pc");
-    std::fs::write(&path, "MUSIC_U=private-session\nInjected: private-session").unwrap();
-    let message = Ncm::new(Some(&path)).err().unwrap();
-    assert_eq!(message, "Invalid NCM cookie file");
-    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn cookie_accepts_bare_music_u_including_base64_padding() {
+    let ncm = Ncm::new(Some("  private-session==  "), "https://api.amll.dev").unwrap();
+    let cookies = ncm.cookies.values(&MUSIC.parse().unwrap());
+    assert_eq!(cookies["MUSIC_U"], "private-session==");
+    assert_eq!(cookies["os"], "pc");
+}
+#[test]
+fn cookie_empty_or_absent_uses_anonymous_access() {
+    for raw in [None, Some(""), Some(" \t\r\n ")] {
+        let ncm = Ncm::new(raw, "https://api.amll.dev").unwrap();
+        let cookies = ncm.cookies.values(&MUSIC.parse().unwrap());
+        assert!(!cookies.contains_key("MUSIC_U"));
+        assert_eq!(cookies["appver"], DESKTOP_APPVER);
+    }
+}
+#[test]
+fn cookie_invalid_content_is_redacted() {
+    for raw in [
+        "MUSIC_U=private-session\nInjected: private-session",
+        "bare\r\nInjected: private-session",
+    ] {
+        assert_eq!(
+            Ncm::new(Some(raw), "https://api.amll.dev").err().unwrap(),
+            "Invalid NCM cookie"
+        );
+    }
 }
 #[test]
 fn cookie_jar_obeys_origin_path_expiry_and_set_cookie() {
@@ -522,8 +703,12 @@ fn cookie_jar_obeys_origin_path_expiry_and_set_cookie() {
             .unwrap()
             .into()
     }
-    let jar = CookieJar::default();
-    jar.insert("os", "pc");
+    let ncm = Ncm::new(Some("initial-session"), "https://api.amll.dev").unwrap();
+    let jar = ncm.cookies;
+    assert_eq!(
+        jar.values(&MUSIC.parse().unwrap())["MUSIC_U"],
+        "initial-session"
+    );
     jar.store(&response(
         "MUSIC_U=secret; Domain=.music.163.com; Path=/",
         MUSIC,
@@ -554,7 +739,7 @@ fn cookie_jar_obeys_origin_path_expiry_and_set_cookie() {
     assert!(!jar.values(&MUSIC.parse().unwrap()).contains_key("expired"));
 }
 #[test]
-fn cli_accepts_cookie_file_and_environment_with_cli_precedence() {
+fn cli_accepts_cookie_and_environment_with_cli_precedence() {
     use crate::cli::Cli;
     const CHILD: &str = "FANTASTIC_NCM_CLI_TEST_CHILD";
     if std::env::var_os(CHILD).is_some() {
@@ -562,28 +747,35 @@ fn cli_accepts_cookie_file_and_environment_with_cli_precedence() {
             Cli::from_arg_matches(&Cli::command().try_get_matches_from(["fantastic"]).unwrap())
                 .unwrap();
         assert_eq!(
-            cli.ncm_cookie_file.as_deref(),
-            Some(FilePath::new("/tmp/ncm-env-cookie.txt"))
+            cli.ncm_cookie.as_deref(),
+            Some("MUSIC_U=private-env-session")
         );
         let cli = Cli::from_arg_matches(
             &Cli::command()
-                .try_get_matches_from(["fantastic", "--ncm-cookie-file", "/tmp/ncm-cli-cookie.txt"])
+                .try_get_matches_from(["fantastic", "--ncm-cookie", "private-cli-session"])
                 .unwrap(),
         )
         .unwrap();
+        assert_eq!(cli.ncm_cookie.as_deref(), Some("private-cli-session"));
+        let state =
+            AppState::with_sources(cli.config().unwrap(), None, cli.ncm_cookie.as_deref()).unwrap();
         assert_eq!(
-            cli.ncm_cookie_file.as_deref(),
-            Some(FilePath::new("/tmp/ncm-cli-cookie.txt"))
+            state.ncm.cookies.values(&MUSIC.parse().unwrap())["MUSIC_U"],
+            "private-cli-session"
         );
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("FANTASTIC_NCM_COOKIE"));
+        assert!(!help.contains("private-env-session"));
+        assert!(!help.contains("ncm-cookie-file"));
         return;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "ncm::tests::cli_accepts_cookie_file_and_environment_with_cli_precedence",
+            "ncm::tests::cli_accepts_cookie_and_environment_with_cli_precedence",
         ])
         .env(CHILD, "1")
-        .env("FANTASTIC_NCM_COOKIE_FILE", "/tmp/ncm-env-cookie.txt")
+        .env("FANTASTIC_NCM_COOKIE", "MUSIC_U=private-env-session")
         .output()
         .unwrap();
     assert!(
@@ -653,12 +845,6 @@ async fn invalid_requests_and_out_of_scope_routes_make_no_upstream_requests() {
         assert_eq!(
             get(state.clone(), path).await.status(),
             StatusCode::BAD_REQUEST
-        );
-    }
-    for path in ["/ncm/cookie"] {
-        assert_eq!(
-            get(state.clone(), path).await.status(),
-            StatusCode::METHOD_NOT_ALLOWED
         );
     }
 }
@@ -734,166 +920,41 @@ async fn cached_detail_search_and_errors_use_public_contract() {
     assert!(check_response(json!({"code":200})).is_ok());
 }
 
-async fn cookie_request(state: Arc<AppState>, method: &str, raw: &str) -> Response {
-    crate::router(state)
-        .oneshot(
-            Request::builder()
-                .uri("/ncm/cookie")
-                .method(method)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(raw.to_owned()))
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-}
-
 #[tokio::test]
-async fn cookie_endpoints_persist_hot_replace_report_only_boolean_and_clear() {
-    let dir = std::env::temp_dir().join(format!("fantastic-ncm-cookie-{}", rand::random::<u64>()));
-    std::fs::create_dir(&dir).unwrap();
-    let path = dir.join("cookie");
-    let mut state = AppState::new("http://localhost:12340".into());
-    state.ncm = Ncm::new(Some(&path)).unwrap();
-    let state = Arc::new(state);
-    assert_eq!(
-        body(get(state.clone(), "/ncm/cookie/status").await).await,
-        json!({"configured":false})
+async fn cookie_management_routes_are_removed_and_credentials_stay_server_side() {
+    let config = AppState::new("http://localhost:12340".into()).config;
+    let state = Arc::new(
+        AppState::with_sources(
+            config,
+            None,
+            Some("MUSIC_U=private-session; __csrf=secret-csrf"),
+        )
+        .unwrap(),
     );
-    for cookie in [
-        "MUSIC_U=private-session; __csrf=secret-csrf",
-        "MUSIC_U=replaced-session",
+    for (method, path) in [
+        ("PUT", "/ncm/cookie"),
+        ("DELETE", "/ncm/cookie"),
+        ("GET", "/ncm/cookie/status"),
     ] {
-        let response =
-            cookie_request(state.clone(), "PUT", &json!({"cookie":cookie}).to_string()).await;
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
-        assert!(response.headers().get(header::SET_COOKIE).is_none());
-        assert!(to_bytes(response.into_body(), 1000)
+        let response = crate::router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .method(method)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
-            .unwrap()
-            .is_empty());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), cookie);
-        let status = get(state.clone(), "/ncm/cookie/status").await;
-        assert_eq!(status.headers()[header::CACHE_CONTROL], "no-store");
-        assert_eq!(body(status).await, json!({"configured":true}));
-        let request = state
-            .ncm
-            .request_builder(DETAIL_PATH, detail_params("347230"), Crypto::Weapi)
-            .unwrap()
-            .build()
             .unwrap();
-        assert!(request.headers()[header::COOKIE]
-            .to_str()
-            .unwrap()
-            .contains(cookie.split(';').next().unwrap()));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
-    let values = state.ncm.cookies.values(&MUSIC.parse().unwrap());
-    assert!(
-        !values.contains_key("__csrf"),
-        "replacing cookies must drop old login state"
-    );
-    assert!(
-        configured(&Ncm::new(Some(&path)).unwrap()),
-        "saved login survives restart"
-    );
-    for cookie in ["other=value", "MUSIC_U=", ""] {
-        assert_eq!(
-            cookie_request(state.clone(), "PUT", &json!({"cookie":cookie}).to_string())
-                .await
-                .status(),
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            body(get(state.clone(), "/ncm/cookie/status").await).await,
-            json!({"configured":false})
-        );
-    }
-    cookie_request(
-        state.clone(),
-        "PUT",
-        r#"{"cookie":"MUSIC_U=clear-me; __csrf=clear-csrf"}"#,
-    )
-    .await;
-    let response = cookie_request(state.clone(), "DELETE", "").await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert!(to_bytes(response.into_body(), 1000)
-        .await
-        .unwrap()
-        .is_empty());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
-    assert_eq!(
-        body(get(state.clone(), "/ncm/cookie/status").await).await,
-        json!({"configured":false})
-    );
-    assert!(!configured(&Ncm::new(Some(&path)).unwrap()));
-    assert!(!state
-        .ncm
-        .cookies
-        .values(&MUSIC.parse().unwrap())
-        .contains_key("__csrf"));
     let host = to_bytes(get(state, "/assets/host.js").await.into_body(), 100000)
         .await
         .unwrap();
     let host = String::from_utf8(host.to_vec()).unwrap();
-    for secret in [
-        "private-session",
-        "replaced-session",
-        "secret-csrf",
-        "clear-me",
-        "MUSIC_U",
-    ] {
+    for secret in ["private-session", "secret-csrf", "MUSIC_U"] {
         assert!(!host.contains(secret));
     }
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[tokio::test]
-async fn cookie_errors_are_explicit_redacted_and_do_not_mutate_memory() {
-    let state = Arc::new(AppState::new("http://localhost:12340".into()));
-    for method in ["PUT", "DELETE"] {
-        let response = cookie_request(
-            state.clone(),
-            method,
-            r#"{"cookie":"MUSIC_U=private-session"}"#,
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            body(response).await,
-            json!({"error":"NCM cookie file is not configured"})
-        );
-    }
-    let response = cookie_request(state.clone(), "PUT", r#"{"cookie":["private-session"]}"#).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(body(response).await, json!({"error":"Invalid NCM request"}));
-    assert!(!configured(&state.ncm));
-    let mut state = AppState::new("http://localhost:12340".into());
-    state.ncm.cookie_file = Some(FilePath::new("/nonexistent-ncm-cookie-dir/cookie").to_owned());
-    let state = Arc::new(state);
-    let response = cookie_request(
-        state.clone(),
-        "PUT",
-        r#"{"cookie":"MUSIC_U=private-session"}"#,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(
-        body(response).await,
-        json!({"error":"Cannot update NCM cookie file"})
-    );
-    assert!(!configured(&state.ncm));
-    let response = cookie_request(state, "PUT", r#"{"cookie":"private-session\r\n"}"#).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(body(response).await, json!({"error":"Invalid NCM request"}));
 }
 
 #[tokio::test]
@@ -949,7 +1010,7 @@ async fn ncm_pages_and_assets_load_on_direct_navigation() {
             );
         }
     }
-    for path in ["/assets/sources/ncm.mjs", "/assets/views/settings-ncm.mjs"] {
+    for path in ["/assets/sources/ncm.mjs", "/assets/lyrics/candidates.mjs"] {
         assert_eq!(get(state.clone(), path).await.status(), StatusCode::OK);
     }
     for path in [
@@ -963,29 +1024,4 @@ async fn ncm_pages_and_assets_load_on_direct_navigation() {
             StatusCode::NOT_FOUND
         );
     }
-}
-
-#[test]
-fn old_inflight_set_cookie_cannot_restore_cleared_login() {
-    use reqwest::ResponseBuilderExt;
-    let jar = anonymous_cookies();
-    jar.insert("MUSIC_U", "old-session");
-    let generation = jar.generation();
-    jar.replace(anonymous_cookies());
-    let response = axum::http::Response::builder()
-        .url(MUSIC.parse().unwrap())
-        .header(
-            header::SET_COOKIE,
-            "MUSIC_U=old-refreshed; Domain=.music.163.com; Path=/",
-        )
-        .body("")
-        .unwrap()
-        .into();
-    jar.store_for_generation(&response, generation);
-    assert!(!jar.values(&MUSIC.parse().unwrap()).contains_key("MUSIC_U"));
-    jar.store_for_generation(&response, jar.generation());
-    assert_eq!(
-        jar.values(&MUSIC.parse().unwrap())["MUSIC_U"],
-        "old-refreshed"
-    );
 }

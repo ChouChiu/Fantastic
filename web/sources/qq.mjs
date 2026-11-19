@@ -1,6 +1,7 @@
 // Display artwork uses public QQ CDN URLs; blob consumers use the local cover adapter.
 import { trackKey, withIdentity } from './track.mjs';
 import { playbackQualityChain } from '../playback-quality.mjs';
+import { selectLyrics as selectCandidates } from '../lyrics/candidates.mjs';
 export { trackKey } from './track.mjs';
 const MID = /^[0-9A-Za-z]{1,32}$/;
 export const enabled = () => globalThis.window?.FANTASTIC_HOST?.qqEnabled === true;
@@ -352,18 +353,8 @@ export function lyricLines(result) {
 /** 默认 AMLL 歌词库优先，其次 QQ 的逐字 QRC、逐行 LRC；歌词来源选了 QRC 时 QRC 优先 */
 export const LYRIC_PRIORITY = ['amll', 'qrc', 'lrc'];
 export const QRC_LYRIC_PRIORITY = ['qrc', 'amll', 'lrc'];
-// Try the next source if a candidate is empty, malformed or has no timed lines.
 export function selectLyrics(candidates, parse, prefer) {
-  for (const source of prefer === 'qrc' ? QRC_LYRIC_PRIORITY : LYRIC_PRIORITY) {
-    for (const candidate of candidates || []) {
-      if (candidate.source !== source || typeof candidate.text !== 'string' || !candidate.text.trim()) continue;
-      try {
-        const song = parse(candidate.text);
-        if (song?.lines?.length) return { source, text: candidate.text, song, authors: [], amllStatus: null };
-      } catch { /* fall through to the next candidate */ }
-    }
-  }
-  return { song: null };
+  return selectCandidates(candidates, (text) => parse(text), prefer === 'qrc' ? QRC_LYRIC_PRIORITY : LYRIC_PRIORITY);
 }
 export async function lyrics(id, parse, signal, prefer) {
   const data = await request(`/qq/song/${mid(id)}/lyrics`, signal);

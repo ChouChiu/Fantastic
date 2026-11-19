@@ -87,7 +87,7 @@ impl AppState {
     }
 
     /// Source credentials stay server-side and outside the shared page configuration.
-    pub fn with_sources(config: Config, qq_proxy: Option<&str>, ncm_cookie_file: Option<&std::path::Path>) -> Result<Self, String> {
+    pub fn with_sources(config: Config, qq_proxy: Option<&str>, ncm_cookie: Option<&str>) -> Result<Self, String> {
         // wrapper-lite 与 Apple CDN（master m3u8）：保持 HTTP/1.1、不请求压缩（amp-api 另用专用客户端）
         let builder = || reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
@@ -117,7 +117,7 @@ impl AppState {
         let qq = config.qq_api.as_deref()
             .map(|base| crate::qq::Qq::new(base, &config.amll_api, qq_proxy))
             .transpose()?;
-        let ncm = crate::ncm::Ncm::new(ncm_cookie_file)?;
+        let ncm = crate::ncm::Ncm::new(ncm_cookie, &config.amll_api)?;
         Ok(Self { config, qq, ncm, http_client, apple_client, wrapper, amp, client_limit, status_cache: Default::default() })
     }
 }

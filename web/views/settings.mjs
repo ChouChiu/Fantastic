@@ -7,7 +7,6 @@ import { appendMediaExtension, formatPath, fitFolder, fitFile, templateIssues, T
 import { downloads, coverUrl } from '../download/downloads.mjs';
 import { ttmlToLrc } from '../lyrics/lrc.mjs';
 import { tokenTail, askToken, onTokenChange } from '../station.mjs';
-import { mountNcmSettings } from './settings-ncm.mjs';
 import { fontSection } from './settings-fonts.mjs';
 
 const { AmI18n, AmDecrypt } = window;
@@ -96,7 +95,6 @@ const SAMPLE = {
 
 export function mount({ root, signal, onLangChange, toast }) {
   document.title = `${t('set.title')} · Fantastic`;
-  mountNcmSettings({ root, signal, onLangChange, toast });
   const host = root.querySelector('#download-body');
   /** 控件：每项设置变化后刷新显示（正在输入的文本框除外） */
   const controls = [];

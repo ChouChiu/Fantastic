@@ -97,7 +97,6 @@ pub static ASSETS: &[Asset] = &[
     asset!("qq-joc-input.mjs"),
     asset!("sources/qq.mjs"),
     asset!("sources/ncm.mjs"),
-    asset!("views/settings-ncm.mjs"),
     asset!("views/ncm-song.html"),
     asset!("views/ncm-song.mjs"),
     asset!("views/ncm-album.html"),
@@ -210,6 +209,7 @@ pub static ASSETS: &[Asset] = &[
     // （backdrop*.mjs，移植自 YouLyPlus）、节拍律动，以及歌词字体库（数据只存在浏览器的 IndexedDB）与中文网字计划的字体目录
     asset!("lyrics/panel.mjs"),
     asset!("lyrics/ttml.mjs"),
+    asset!("lyrics/candidates.mjs"),
     asset!("lyrics/lrc.mjs"),
     asset!("lyrics/amll-core.mjs"),
     asset!("lyrics/amll.css"),

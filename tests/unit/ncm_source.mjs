@@ -102,6 +102,44 @@ test('YRC has priority over LRC regardless of order; malformed or empty YRC fall
   assert.deepEqual(song.lines.map((l) => l.begin), [1250, 3055]);
 });
 
+test('NCM prefers AMLL TTML through the supplied parser and falls back to YRC/LRC on parse failure', () => {
+  const candidates = [{ source: 'lrc', text: lrc }, { source: 'yrc', text: yrc }, { source: 'amll', text: '<tt>AMLL</tt>' }];
+  const song = { lines: [{ text: 'AMLL', begin: 0, end: 1000, tokens: [] }] };
+  const parse = (text) => { assert.equal(text, '<tt>AMLL</tt>'); return song; };
+  const selected = ncm.selectLyrics(candidates, parse);
+  assert.equal(selected.source, 'amll');
+  assert.equal(selected.song, song);
+  for (const parse of [() => { throw new Error('invalid TTML'); }, () => ({ lines: [] }), () => null]) {
+    assert.equal(ncm.selectLyrics(candidates, parse).source, 'yrc');
+    assert.equal(ncm.selectLyrics([candidates[0], candidates[2]], parse).source, 'lrc');
+  }
+});
+
+test('NCM AMLL loading keeps TTML translations and romanization while preserving raw download flags', async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const text = '<tt>AMLL</tt>';
+  const song = ncm.parseLrc('[00:01.00]AMLL');
+  Object.assign(song.lines[0], { translation: 'TTML translation', pronunciation: 'TTML romanization' });
+  globalThis.fetch = async (path, options) => {
+    assert.equal(options.signal, controller.signal);
+    calls.push(path);
+    if (path.endsWith('/lyrics')) return { ok: true, json: async () => ({
+      candidates: [{ source: 'yrc', text: yrc }, { source: 'amll', text }], rawYrc: true, rawTrans: true, rawRoma: true }) };
+    return { ok: true, text: async () => '[00:01.00]Native auxiliary text' };
+  };
+  const result = await ncm.lyrics('347230', (input) => { assert.equal(input, text); return song; }, controller.signal);
+  assert.equal(result.source, 'amll');
+  assert.equal(result.song, song);
+  assert.equal(result.song.lines[0].translation, 'TTML translation');
+  assert.equal(result.song.lines[0].pronunciation, 'TTML romanization');
+  assert.equal(result.rawYrc, true);
+  assert.equal(result.rawTrans, true);
+  assert.equal(result.rawRoma, true);
+  assert.ok(calls.includes('/ncm/song/347230/lyrics/raw?kind=trans'));
+  assert.equal(amllConverter()(song)[0].words[0].word, 'AMLL');
+});
+
 function amllConverter() {
   const source = fs.readFileSync(new URL('../../web/lyrics/panel.mjs', import.meta.url), 'utf8');
   const helpers = source.match(/const validTokens =[^]*?const same =[^]*?;\n/)[0];

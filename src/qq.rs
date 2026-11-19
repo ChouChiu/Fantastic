@@ -2082,7 +2082,7 @@ fn wrap(body: &str, word: bool) -> String {
     format!("<tt xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttm=\"http://www.w3.org/ns/ttml#metadata\" xmlns:itunes=\"http://music.apple.com/lyric-ttml-internal\" itunes:timing=\"{}\">{body}</tt>", if word { "Word" } else { "Line" })
 }
 /// Reject oversized or entity-bearing upstream TTML without changing its contents.
-fn ttml_fetchable(text: &str) -> bool {
+pub(crate) fn ttml_fetchable(text: &str) -> bool {
     static UNSAFE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<!DOCTYPE|<!ENTITY").unwrap());
     text.len() <= 2_000_000 && !UNSAFE.is_match(text)
 }
@@ -2914,7 +2914,7 @@ async fn fetch_new_lyrics(qq: &Qq, mid: &str) -> LyricsSource<Value> {
     }
 }
 
-const LYRICS_RETRY_TTL: Duration = Duration::from_secs(300);
+pub(crate) const LYRICS_RETRY_TTL: Duration = Duration::from_secs(300);
 
 async fn fetch_lyrics(qq: &Qq, mid: &str) -> ApiResult<(Lyrics, Duration)> {
     // Fetch all upstreams and the cold song context together. The context is only

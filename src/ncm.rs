@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::get,
     Json, Router,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -19,11 +19,7 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
-    path::{Path as FilePath, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, LazyLock, Mutex,
-    },
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -37,8 +33,6 @@ impl IntoResponse for NcmError {
             Json(json!({"error": match self.0 {
                 StatusCode::BAD_REQUEST => "Invalid NCM request",
                 StatusCode::NOT_FOUND => "NCM resource not found",
-                StatusCode::SERVICE_UNAVAILABLE => "NCM cookie file is not configured",
-                StatusCode::INTERNAL_SERVER_ERROR => "Cannot update NCM cookie file",
                 _ => "NCM source temporarily unavailable",
             }})),
         )
@@ -140,7 +134,7 @@ struct Cookie {
 /// A private jar for the two fixed HTTPS API origins. It ingests Set-Cookie,
 /// observes domain/path/expiry, and never serializes or implements Debug.
 #[derive(Default)]
-struct CookieJar(Mutex<BTreeMap<(String, String, String), Cookie>>, AtomicU64);
+struct CookieJar(Mutex<BTreeMap<(String, String, String), Cookie>>);
 impl CookieJar {
     fn insert(&self, name: &str, value: &str) {
         self.0.lock().unwrap().insert(
@@ -173,19 +167,7 @@ impl CookieJar {
             .map(|((name, _, _), cookie)| (name.clone(), cookie.value.clone()))
             .collect()
     }
-    fn generation(&self) -> u64 {
-        self.1.load(Ordering::Acquire)
-    }
-    fn replace(&self, jar: CookieJar) {
-        let mut values = self.0.lock().unwrap();
-        self.1.fetch_add(1, Ordering::AcqRel);
-        *values = std::mem::take(&mut *jar.0.lock().unwrap());
-    }
-    #[cfg(test)]
     fn store(&self, response: &reqwest::Response) {
-        self.store_for_generation(response, self.generation());
-    }
-    fn store_for_generation(&self, response: &reqwest::Response, generation: u64) {
         let host = response.url().host_str().unwrap_or_default();
         if !matches!(host, "music.163.com" | "interface.music.163.com") {
             return;
@@ -237,9 +219,6 @@ impl CookieJar {
             }
             if valid {
                 let mut values = self.0.lock().unwrap();
-                if generation != self.generation() {
-                    return;
-                }
                 values.insert(
                     (name.into(), cookie.domain.clone(), cookie.path.clone()),
                     cookie,
@@ -268,7 +247,7 @@ fn cookie_header(values: &BTreeMap<String, String>) -> ApiResult<header::HeaderV
     Ok(value)
 }
 
-// Fresh anonymous protocol/device cookies; replacing a login never retains old account cookies.
+// Anonymous protocol/device cookies, seeded with the configured login at startup.
 fn anonymous_cookies() -> CookieJar {
     let cookies = CookieJar::default();
     for (name, value) in [
@@ -304,6 +283,17 @@ fn anonymous_cookies() -> CookieJar {
     cookies
 }
 fn parse_cookies(raw: &str) -> ApiResult<Vec<(String, String)>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let wrapped;
+    let raw = if raw.contains("MUSIC_U=") {
+        raw
+    } else {
+        wrapped = format!("MUSIC_U={raw}");
+        &wrapped
+    };
     raw.trim()
         .split(';')
         .map(str::trim)
@@ -344,9 +334,8 @@ impl<T: Clone> Cache<T> {
 }
 pub struct Ncm {
     api: reqwest::Client,
+    amll: String,
     cookies: CookieJar,
-    cookie_file: Option<PathBuf>,
-    cookie_updates: tokio::sync::Mutex<()>,
     permits: tokio::sync::Semaphore,
     rate: crate::wrapper::RateLimit,
     searches: Cache<SearchResult>,
@@ -360,19 +349,11 @@ enum Crypto {
     Eapi,
 }
 impl Ncm {
-    pub fn new(cookie_file: Option<&FilePath>) -> Result<Self, String> {
+    pub fn new(cookie: Option<&str>, amll: &str) -> Result<Self, String> {
         let cookies = anonymous_cookies();
-        if let Some(path) = cookie_file {
-            match std::fs::read_to_string(path) {
-                Ok(raw) => {
-                    for (name, value) in
-                        parse_cookies(&raw).map_err(|_| "Invalid NCM cookie file")?
-                    {
-                        cookies.insert(&name, &value);
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err("Cannot read NCM cookie file".into()),
+        if let Some(raw) = cookie {
+            for (name, value) in parse_cookies(raw).map_err(|_| "Invalid NCM cookie")? {
+                cookies.insert(&name, &value);
             }
         }
         let api = reqwest::Client::builder()
@@ -385,9 +366,8 @@ impl Ncm {
             .map_err(|_| "Cannot construct NCM HTTP client")?;
         Ok(Self {
             api,
+            amll: amll.trim_end_matches('/').to_owned(),
             cookies,
-            cookie_file: cookie_file.map(FilePath::to_path_buf),
-            cookie_updates: tokio::sync::Mutex::new(()),
             permits: tokio::sync::Semaphore::new(8),
             rate: crate::wrapper::RateLimit::new(10),
             searches: Cache::new(128),
@@ -491,14 +471,13 @@ impl Ncm {
             let retry = {
                 let _permit = self.permits.acquire().await.map_err(|_| unavailable())?;
                 self.rate.acquire().await;
-                let generation = self.cookies.generation();
                 match self
                     .request_builder(path, data.clone(), crypto)?
                     .send()
                     .await
                 {
                     Ok(response) => {
-                        self.cookies.store_for_generation(&response, generation);
+                        self.cookies.store(&response);
                         let status = response.status();
                         if status.is_success() {
                             match response.json::<Value>().await {
@@ -1687,8 +1666,6 @@ fn adapter(state: &AppState) -> &Ncm {
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/ncm/capabilities", get(capabilities))
-        .route("/ncm/cookie", put(set_cookie).delete(clear_cookie))
-        .route("/ncm/cookie/status", get(cookie_status))
         .route("/ncm/search", get(search))
         .route("/ncm/suggest", get(suggest))
         .route("/ncm/album/:id", get(album))
@@ -1702,72 +1679,6 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/ncm/song/:id/download", get(download))
         .route("/ncm/song/:id/lyrics", get(lyrics))
         .route("/ncm/song/:id/lyrics/raw", get(raw_lyrics))
-}
-#[derive(Deserialize)]
-struct CookieInput {
-    cookie: String,
-}
-fn configured(ncm: &Ncm) -> bool {
-    ncm.cookies
-        .values(&MUSIC.parse().unwrap())
-        .get("MUSIC_U")
-        .is_some_and(|v| !v.is_empty())
-}
-async fn cookie_status(State(state): State<Arc<AppState>>) -> Response {
-    (
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({"configured": configured(adapter(&state))})),
-    )
-        .into_response()
-}
-async fn update_cookie(ncm: &Ncm, raw: &str) -> ApiResult<Response> {
-    let path = ncm
-        .cookie_file
-        .as_ref()
-        .ok_or(NcmError(StatusCode::SERVICE_UNAVAILABLE))?;
-    let pairs = parse_cookies(raw)?;
-    let _update = ncm.cookie_updates.lock().await;
-    let jar = anonymous_cookies();
-    for (name, value) in pairs {
-        jar.insert(&name, &value);
-    }
-    let io_error = |_| NcmError(StatusCode::INTERNAL_SERVER_ERROR);
-    let mut options = tokio::fs::OpenOptions::new();
-    options.write(true).create(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(path).await.map_err(io_error)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .await
-            .map_err(io_error)?;
-    }
-    file.set_len(0).await.map_err(io_error)?;
-    use tokio::io::AsyncWriteExt;
-    file.write_all(raw.trim().as_bytes())
-        .await
-        .map_err(io_error)?;
-    file.flush().await.map_err(io_error)?;
-    ncm.cookies.replace(jar);
-    // Song privileges can change with the login. Never reuse an old entitlement.
-    ncm.details.0.lock().unwrap().clear();
-    Ok((
-        StatusCode::NO_CONTENT,
-        [(header::CACHE_CONTROL, "no-store")],
-    )
-        .into_response())
-}
-async fn set_cookie(
-    State(state): State<Arc<AppState>>,
-    input: Result<Json<CookieInput>, axum::extract::rejection::JsonRejection>,
-) -> ApiResult<Response> {
-    let Json(input) = input.map_err(|_| bad())?;
-    update_cookie(adapter(&state), &input.cookie).await
-}
-async fn clear_cookie(State(state): State<Arc<AppState>>) -> ApiResult<Response> {
-    update_cookie(adapter(&state), "").await
 }
 async fn download(
     State(state): State<Arc<AppState>>,
@@ -1980,17 +1891,87 @@ async fn playlist(
         more,
     }))
 }
-async fn fetch_lyrics(ncm: &Ncm, id: &str) -> ApiResult<(Lyrics, u64)> {
-    let raw = ncm
-        .request(LYRIC_PATH, lyric_params(id), Crypto::Weapi)
-        .await?;
-    let lyrics = lyrics_dto(&raw);
-    let ttl = if lyrics.candidates.is_empty() {
+enum LyricsSource<T> {
+    Success(T),
+    None,
+    Failed,
+}
+
+async fn fetch_amll_lyrics(ncm: &Ncm, id: &str) -> LyricsSource<String> {
+    let response = match ncm
+        .api
+        .get(format!("{}/v1/lyrics/get", ncm.amll))
+        .query(&[("ncmMusicId", id)])
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::debug!(error = %error.without_url(), "ncm AMLL lyrics source failed");
+            return LyricsSource::Failed;
+        }
+    };
+    if matches!(
+        response.status(),
+        StatusCode::NOT_FOUND | StatusCode::NO_CONTENT
+    ) {
+        return LyricsSource::None;
+    }
+    if !response.status().is_success() {
+        tracing::debug!(status = %response.status(), "ncm AMLL lyrics source failed");
+        return LyricsSource::Failed;
+    }
+    let raw = match response.json::<Value>().await {
+        Ok(raw) => raw,
+        Err(error) => {
+            tracing::debug!(error = %error, "ncm AMLL lyrics response decode failed");
+            return LyricsSource::Failed;
+        }
+    };
+    raw.pointer("/data/lyrics")
+        .and_then(Value::as_str)
+        .filter(|text| crate::qq::ttml_fetchable(text))
+        .map(str::to_owned)
+        .map_or(LyricsSource::None, LyricsSource::Success)
+}
+
+fn lyrics_from_sources(
+    amll: LyricsSource<String>,
+    new: ApiResult<Value>,
+) -> ApiResult<(Lyrics, u64)> {
+    let new_failed = new
+        .as_ref()
+        .is_err_and(|error| error.0 != StatusCode::NOT_FOUND);
+    let amll_failed = matches!(amll, LyricsSource::Failed);
+    if amll_failed && new_failed {
+        return Err(unavailable());
+    }
+    let mut lyrics = lyrics_dto(&new.unwrap_or(Value::Null));
+    if let LyricsSource::Success(text) = amll {
+        lyrics.candidates.insert(
+            0,
+            Lyric {
+                source: "amll",
+                text,
+            },
+        );
+    }
+    let ttl = if amll_failed || new_failed {
+        crate::qq::LYRICS_RETRY_TTL.as_secs()
+    } else if lyrics.candidates.is_empty() {
         3600
     } else {
         604800
     };
     Ok((lyrics, ttl))
+}
+
+async fn fetch_lyrics(ncm: &Ncm, id: &str) -> ApiResult<(Lyrics, u64)> {
+    let (amll, new) = tokio::join!(
+        fetch_amll_lyrics(ncm, id),
+        ncm.request(LYRIC_PATH, lyric_params(id), Crypto::Weapi),
+    );
+    lyrics_from_sources(amll, new)
 }
 async fn lyrics(
     State(state): State<Arc<AppState>>,

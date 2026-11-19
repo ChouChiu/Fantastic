@@ -76,9 +76,9 @@ pub struct Cli {
     #[arg(long, env = "FANTASTIC_QQ_PROXY", hide_env_values = true)]
     pub qq_proxy: Option<String>,
 
-    /// Server-only NCM Cookie text file; missing files use anonymous access
-    #[arg(long, env = "FANTASTIC_NCM_COOKIE_FILE", hide_env_values = true)]
-    pub ncm_cookie_file: Option<std::path::PathBuf>,
+    /// Server-only NCM cookie string or bare MUSIC_U value; empty uses anonymous access
+    #[arg(long, env = "FANTASTIC_NCM_COOKIE", hide_env_values = true)]
+    pub ncm_cookie: Option<String>,
 
     /// Max wrapper-lite requests relayed per client IP in any 60 seconds (/status not
     /// counted); further requests get HTTP 429 with Retry-After. 0 = unlimited
