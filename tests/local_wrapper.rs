@@ -67,6 +67,7 @@ async fn local_wrapper_only_never_relays() {
             "serverWrapper": false,
             "amllApi": "https://api.amll.dev",
             "qqEnabled": false,
+            "ncmEnabled": true,
             "version": env!("CARGO_PKG_VERSION"),
             "wrapper": { "url": wrapper, "rate": 5, "concurrency": 3 },
             "hint": "Get a token at https://token.test",
@@ -90,7 +91,7 @@ async fn local_wrapper_only_never_relays() {
     let text = client.get(format!("{relay}/assets/host.js")).send().await.unwrap().text().await.unwrap();
     assert_eq!(
         text,
-        format!("window.FANTASTIC_HOST = {{\"amllApi\":\"https://api.amll.dev\",\"hint\":\"Get a token at https://token.test\",\"qqEnabled\":false,\"serverWrapper\":true,\"version\":\"{}\"}};\n", env!("CARGO_PKG_VERSION"))
+        format!("window.FANTASTIC_HOST = {{\"amllApi\":\"https://api.amll.dev\",\"hint\":\"Get a token at https://token.test\",\"ncmEnabled\":true,\"qqEnabled\":false,\"serverWrapper\":true,\"version\":\"{}\"}};\n", env!("CARGO_PKG_VERSION"))
     );
     assert_eq!(client.get(format!("{relay}/status")).send().await.unwrap().status(), 200);
     assert_eq!(calls.load(Ordering::SeqCst), 2, "primary and fallback are each checked once");

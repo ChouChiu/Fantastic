@@ -8,6 +8,7 @@ pub mod links;
 pub mod security;
 pub mod state;
 pub mod qq;
+pub mod ncm;
 pub mod updater;
 pub mod wrapper;
 
@@ -42,6 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     router
         .merge(relay)
         .merge(qq)
+        .merge(ncm::routes())
         .route(assets::HOST_JS, get(handlers::host_js_handler))
         .route("/", get(handlers::app_handler))
         // 「新发现」（官网 /{cc}/new，这里跟随主地区）

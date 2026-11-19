@@ -42,6 +42,7 @@ pub struct Config {
 pub struct AppState {
     pub config: Config,
     pub qq: Option<crate::qq::Qq>,
+    pub ncm: crate::ncm::Ncm,
     pub http_client: reqwest::Client,
     /// 同 `http_client`，但重定向只允许跳到 apple.com（处理不受信任的 URL）
     pub apple_client: reqwest::Client,
@@ -82,6 +83,11 @@ impl AppState {
 
     /// QQ 出站代理仅用于 QQ 客户端，不进入共享页面配置。
     pub fn with_qq_proxy(config: Config, qq_proxy: Option<&str>) -> Result<Self, String> {
+        Self::with_sources(config, qq_proxy, None)
+    }
+
+    /// Source credentials stay server-side and outside the shared page configuration.
+    pub fn with_sources(config: Config, qq_proxy: Option<&str>, ncm_cookie_file: Option<&std::path::Path>) -> Result<Self, String> {
         // wrapper-lite 与 Apple CDN（master m3u8）：保持 HTTP/1.1、不请求压缩（amp-api 另用专用客户端）
         let builder = || reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
@@ -111,7 +117,8 @@ impl AppState {
         let qq = config.qq_api.as_deref()
             .map(|base| crate::qq::Qq::new(base, &config.amll_api, qq_proxy))
             .transpose()?;
-        Ok(Self { config, qq, http_client, apple_client, wrapper, amp, client_limit, status_cache: Default::default() })
+        let ncm = crate::ncm::Ncm::new(ncm_cookie_file)?;
+        Ok(Self { config, qq, ncm, http_client, apple_client, wrapper, amp, client_limit, status_cache: Default::default() })
     }
 }
 
