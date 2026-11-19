@@ -197,6 +197,85 @@ fn search_maps_albums_artists_playlists_and_empty_pages() {
     assert!(search_dto(&json!({}), SearchKind::Song).is_err());
 }
 #[test]
+fn lyric_new_maps_word_timestamps_translation_and_romanization() {
+    let raw = json!({
+        "code": 200,
+        "yrc": {"version": 1, "lyric": "[0,120](0,60)海(60,60)阔\n"},
+        "lrc": {"version": 1, "lyric": "[00:00.00]海阔天空\n"},
+        "tlyric": {"version": 1, "lyric": "[00:00.00]Broad sky\n"},
+        "romalrc": {"version": 1, "lyric": "[00:00.00]Hoi3 fut3\n"},
+        "yromalrc": {"version": 1, "lyric": "[0,120](0,60)Hoi(60,60)\n"}
+    });
+    let dto = value(lyrics_dto(&raw));
+    assert_eq!(
+        dto,
+        json!({
+            "candidates": [
+                {"source":"yrc", "text":"[0,120](0,60)海(60,60)阔\n"},
+                {"source":"lrc", "text":"[00:00.00]海阔天空\n"}
+            ],
+            "rawYrc": true,
+            "rawTrans": true,
+            "rawRoma": true
+        })
+    );
+    let lyrics = lyrics_dto(&raw);
+    assert_eq!(lyrics.raw.yroma.as_deref(), Some("[0,120](0,60)Hoi(60,60)\n"));
+    assert_eq!(raw_lyrics_kind(Some("yroma")).unwrap(), "yroma");
+    assert_eq!(raw_lyrics_kind(Some("qrc")).err().unwrap().0, StatusCode::BAD_REQUEST);
+}
+#[test]
+fn album_artist_and_playlist_samples_map_to_qq_contract() {
+    let album = album_dto(
+        &json!({
+            "code": 200,
+            "album": {"id": 42, "name":"专辑", "picUrl":"http://p1.music.126.net/a.jpg",
+                "publishTime": 1700000000000u64, "size": 1, "type":"国语", "description":"desc",
+                "artists":[{"id":7,"name":"歌手"}]},
+            "songs": [song()]
+        }),
+        "42",
+    )
+    .unwrap();
+    let album = value(album);
+    assert_eq!(album["album"]["mid"], "42");
+    assert_eq!(album["album"]["artists"][0], json!({"name":"歌手","mid":"7"}));
+    assert_eq!(album["songs"][0]["id"], "347230");
+
+    let artist_raw = json!({
+        "code": 200,
+        "data": {"artist": {"id": 7, "name":"歌手", "picUrl":"http://p1.music.126.net/a.jpg",
+            "briefDesc":"brief", "trans":["Singer"], "musicSize":3, "albumSize":2, "mvSize":1},
+            "user":{"description":"long", "birthday":946684800000u64}}
+    });
+    let artist = value(artist_detail_dto(&artist_raw, "7").unwrap());
+    assert_eq!(artist["mid"], "7");
+    assert_eq!(artist["description"], "long");
+    assert_eq!(artist["transNames"], json!(["Singer"]));
+    let songs = value(song_page_dto(&json!({"code":200,"data":{"songs":[song()],"total":"1","more":false}})));
+    assert_eq!(songs, json!({"songs":[value(song_dto(&song()).unwrap())],"total":1,"more":false}));
+
+    let playlist = value(playlist_info(
+        &json!({"code":200,"playlist":{"id":99,"name":"歌单","coverImgUrl":"http://p2.music.126.net/p.jpg",
+            "trackCount":1,"description":"desc","creator":{"nickname":"listener"},"updateTime":1700000000000u64}}),
+        "99",
+    ).unwrap());
+    assert_eq!(playlist["id"], "99");
+    assert_eq!(playlist["creator"], "listener");
+    assert_eq!(playlist["updateTime"], 1700000000000u64);
+}
+#[test]
+fn suggestion_sample_maps_all_three_collections() {
+    let dto = value(suggest_dto(&json!({"code":200,"result":{
+        "songs":[{"id":1,"name":"歌","artists":[{"id":2,"name":"人"}]}],
+        "artists":[{"id":2,"name":"人","picUrl":"http://p1.music.126.net/a.jpg","albumSize":3,"mvSize":4}],
+        "albums":[{"id":3,"name":"碟","artist":{"name":"人"},"picUrl":"http://p1.music.126.net/b.jpg"}]
+    }})).unwrap());
+    assert_eq!(dto["songs"][0], json!({"mid":"1","name":"歌","artist":"人"}));
+    assert_eq!(dto["artists"][0]["mid"], "2");
+    assert_eq!(dto["albums"][0], json!({"mid":"3","name":"碟","artist":"人","cover":"https://p1.music.126.net/b.jpg"}));
+}
+#[test]
 fn detail_is_flattened_meta_is_absent_and_ids_must_match() {
     let dto = value(detail_dto(&detail(), "347230").unwrap());
     assert_eq!(dto["id"], "347230");
@@ -546,19 +625,38 @@ async fn invalid_requests_and_out_of_scope_routes_make_no_upstream_requests() {
             StatusCode::BAD_REQUEST
         );
     }
-    for path in [
-        "/ncm/suggest?q=x",
-        "/ncm/album/1",
-        "/ncm/artist/1",
-        "/ncm/playlist/1",
-        "/ncm/song/1/lyrics",
-        "/ncm/cookie",
-    ] {
+    for path in ["/ncm/cookie"] {
         assert_eq!(
             get(state.clone(), path).await.status(),
             StatusCode::NOT_FOUND
         );
     }
+}
+#[tokio::test]
+async fn cached_ncm_raw_lyrics_matches_qq_download_contract() {
+    let state = Arc::new(AppState::new("http://localhost:12340".into()));
+    state.ncm.details.put("347230".into(), detail(), 60);
+    state.ncm.lyrics.put(
+        "347230".into(),
+        lyrics_dto(&json!({"code":200,"lrc":{"lyric":"[00:00.00]海阔天空\n"}})),
+        60,
+    );
+    let response = get(state.clone(), "/ncm/song/347230/lyrics/raw?kind=lrc").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "text/plain; charset=utf-8");
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert!(response.headers()[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .contains("filename*=UTF-8''"));
+    assert_eq!(
+        String::from_utf8(to_bytes(response.into_body(), 100000).await.unwrap().to_vec()).unwrap(),
+        "[00:00.00]海阔天空\n"
+    );
+    assert_eq!(
+        get(state, "/ncm/song/347230/lyrics/raw?kind=qrc").await.status(),
+        StatusCode::BAD_REQUEST
+    );
 }
 #[tokio::test]
 async fn cached_detail_search_and_errors_use_public_contract() {

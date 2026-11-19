@@ -116,6 +116,11 @@ const INTERFACE: &str = "https://interface.music.163.com";
 const SEARCH_PATH: &str = "/api/cloudsearch/pc";
 const DETAIL_PATH: &str = "/api/v3/song/detail";
 const PLAY_PATH: &str = "/api/song/enhance/player/url/v1";
+const LYRIC_PATH: &str = "/api/song/lyric/v1";
+const ARTIST_DETAIL_PATH: &str = "/api/artist/head/info/get";
+const ARTIST_SONGS_PATH: &str = "/api/v1/artist/songs";
+const PLAYLIST_DETAIL_PATH: &str = "/api/v6/playlist/detail";
+const SUGGEST_PATH: &str = "/api/search/suggest/web";
 const WEB_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0";
 const APP_UA: &str = "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)";
 
@@ -272,6 +277,8 @@ pub struct Ncm {
     rate: crate::wrapper::RateLimit,
     searches: Cache<SearchResult>,
     details: Cache<Value>,
+    suggestions: Cache<Suggestions>,
+    lyrics: Cache<Lyrics>,
 }
 #[derive(Clone, Copy)]
 enum Crypto {
@@ -346,6 +353,8 @@ impl Ncm {
             rate: crate::wrapper::RateLimit::new(10),
             searches: Cache::new(128),
             details: Cache::new(512),
+            suggestions: Cache::new(256),
+            lyrics: Cache::new(1024),
         })
     }
     fn request_builder(
@@ -354,10 +363,27 @@ impl Ncm {
         mut data: Value,
         crypto: Crypto,
     ) -> ApiResult<reqwest::RequestBuilder> {
-        let allowed = matches!(
-            (path, crypto),
-            (SEARCH_PATH | DETAIL_PATH, Crypto::Weapi) | (PLAY_PATH, Crypto::Eapi)
-        );
+        let allowed = match crypto {
+            Crypto::Weapi => {
+                path == SEARCH_PATH
+                    || path == DETAIL_PATH
+                    || path == LYRIC_PATH
+                    || path
+                        .strip_prefix("/api/v1/album/")
+                        .is_some_and(valid_id)
+                    || path
+                        .strip_prefix("/api/artist/albums/")
+                        .is_some_and(valid_id)
+                    || path == SUGGEST_PATH
+            }
+            Crypto::Eapi => {
+                path == PLAY_PATH
+                    || path == DETAIL_PATH
+                    || path == ARTIST_DETAIL_PATH
+                    || path == ARTIST_SONGS_PATH
+                    || path == PLAYLIST_DETAIL_PATH
+            }
+        };
         if !allowed {
             return Err(bad());
         }
@@ -544,7 +570,16 @@ fn text(value: &Value) -> String {
     value.as_str().unwrap_or_default().into()
 }
 fn count(value: &Value) -> u64 {
-    value.as_u64().unwrap_or_default()
+    value
+        .as_u64()
+        .or_else(|| value.as_str()?.parse().ok())
+        .unwrap_or_default()
+}
+fn flag(value: &Value) -> bool {
+    value.as_bool()
+        .or_else(|| value.as_u64().map(|value| value != 0))
+        .or_else(|| value.as_str().map(|value| matches!(value, "1" | "true")))
+        .unwrap_or(false)
 }
 fn cdn_url(raw: &str) -> Option<reqwest::Url> {
     let url = reqwest::Url::parse(raw).ok()?;
@@ -709,6 +744,124 @@ struct SearchResult {
     playlists: Option<Vec<PlaylistSummary>>,
     total: u64,
 }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Album {
+    mid: String,
+    name: String,
+    cover: String,
+    publish_time: u64,
+    size: u64,
+    sub_type: String,
+    language: String,
+    description: String,
+    artists: Vec<Artist>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AlbumPage {
+    album: Album,
+    songs: Vec<Song>,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SongPage {
+    songs: Vec<Song>,
+    total: u64,
+    more: bool,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistDetail {
+    mid: String,
+    name: String,
+    avatar: String,
+    cover: String,
+    brief_desc: String,
+    description: String,
+    trans_names: Vec<String>,
+    birthday: u64,
+    music_size: u64,
+    album_size: u64,
+    mv_size: u64,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistPage {
+    artist: ArtistDetail,
+    songs: Vec<Song>,
+    total_songs: u64,
+    more_songs: bool,
+    albums: Vec<AlbumSummary>,
+    more_albums: bool,
+    mvs: Vec<Value>,
+    more_mvs: bool,
+}
+#[derive(Serialize)]
+struct AlbumList {
+    albums: Vec<AlbumSummary>,
+    more: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaylistInfo {
+    id: String,
+    name: String,
+    cover: String,
+    track_count: u64,
+    description: String,
+    creator: String,
+    update_time: u64,
+}
+#[derive(Serialize)]
+struct PlaylistPage {
+    playlist: Option<PlaylistInfo>,
+    songs: Vec<Song>,
+    more: bool,
+}
+#[derive(Clone, Serialize)]
+struct SuggestSong {
+    mid: String,
+    name: String,
+    artist: String,
+}
+#[derive(Clone, Serialize)]
+struct SuggestAlbum {
+    mid: String,
+    name: String,
+    artist: String,
+    cover: String,
+}
+#[derive(Clone, Serialize)]
+struct Suggestions {
+    songs: Vec<SuggestSong>,
+    artists: Vec<ArtistSummary>,
+    albums: Vec<SuggestAlbum>,
+}
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Lyrics {
+    candidates: Vec<Lyric>,
+    raw_yrc: bool,
+    raw_trans: bool,
+    raw_roma: bool,
+    #[serde(skip_serializing)]
+    raw: RawLyrics,
+}
+#[derive(Clone, Default, PartialEq)]
+struct RawLyrics {
+    yrc: Option<String>,
+    lrc: Option<String>,
+    trans: Option<String>,
+    roma: Option<String>,
+    yroma: Option<String>,
+}
+#[derive(Clone, PartialEq, Serialize)]
+struct Lyric {
+    source: &'static str,
+    text: String,
+}
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum SearchKind {
@@ -789,6 +942,396 @@ fn search_dto(raw: &Value, kind: SearchKind) -> ApiResult<SearchResult> {
         }
     }
     Ok(data)
+}
+
+fn payload(raw: &Value) -> &Value {
+    raw.get("data")
+        .filter(|value| value.is_object())
+        .unwrap_or(raw)
+}
+
+fn album_dto(raw: &Value, id: &str) -> ApiResult<AlbumPage> {
+    let album_raw = raw
+        .get("album")
+        .filter(|value| value.is_object())
+        .or_else(|| payload(raw).get("album").filter(|value| value.is_object()))
+        .ok_or_else(unavailable)?;
+    let songs_raw = raw
+        .get("songs")
+        .and_then(Value::as_array)
+        .or_else(|| payload(raw).get("songs").and_then(Value::as_array))
+        .or_else(|| album_raw.get("songs").and_then(Value::as_array))
+        .ok_or_else(unavailable)?;
+    let songs: Vec<Song> = songs_raw.iter().filter_map(song_dto).collect();
+    let album_id = id_of(&album_raw["id"])
+        .or_else(|| id_of(&album_raw["albumId"]))
+        .unwrap_or_else(|| id.to_owned());
+    let artists = album_raw
+        .get("artists")
+        .map(artists)
+        .or_else(|| album_raw.get("artist").map(|artist| artists(&json!([artist]))))
+        .unwrap_or_default();
+    Ok(AlbumPage {
+        album: Album {
+            mid: album_id,
+            name: text(&album_raw["name"]),
+            cover: cover(&album_raw["picUrl"]),
+            publish_time: count(&album_raw["publishTime"]),
+            size: count(&album_raw["size"]).max(songs.len() as u64),
+            sub_type: text(&album_raw["subType"]),
+            language: text(&album_raw["type"]),
+            description: text(&album_raw["description"]),
+            artists,
+        },
+        songs,
+    })
+}
+
+fn artist_detail_raw(raw: &Value) -> Option<&Value> {
+    raw.pointer("/data/artist")
+        .or_else(|| raw.get("artist"))
+        .or_else(|| payload(raw).get("artist"))
+        .or_else(|| {
+            let value = payload(raw);
+            value
+                .get("name")
+                .and_then(|_| value.get("id").or_else(|| value.get("mid")))
+                .map(|_| value)
+        })
+        .filter(|value| value.is_object())
+}
+
+fn string_list(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(values) => values
+            .iter()
+            .filter_map(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Value::String(value) if !value.trim().is_empty() => {
+            vec![value.trim().to_owned()]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn artist_detail_dto(raw: &Value, id: &str) -> ApiResult<ArtistDetail> {
+    let artist = artist_detail_raw(raw).ok_or_else(unavailable)?;
+    let data = payload(raw);
+    let trans_names = string_list(&artist["transNames"]);
+    let trans_names = if trans_names.is_empty() {
+        let mut values = string_list(&artist["trans"]);
+        if values.is_empty() {
+            values = string_list(&artist["alias"]);
+        }
+        values
+    } else {
+        trans_names
+    };
+    let id = id_of(&artist["id"])
+        .or_else(|| id_of(&artist["mid"]))
+        .unwrap_or_else(|| id.to_owned());
+    let avatar = cover(
+        artist
+            .get("avatar")
+            .or_else(|| artist.get("picUrl"))
+            .or_else(|| artist.get("img1v1Url"))
+            .unwrap_or(&Value::Null),
+    );
+    let cover_url = cover(
+        artist
+            .get("cover")
+            .or_else(|| artist.get("picUrl"))
+            .or_else(|| artist.get("img1v1Url"))
+            .unwrap_or(&Value::Null),
+    );
+    Ok(ArtistDetail {
+        mid: id,
+        name: text(&artist["name"]),
+        avatar,
+        cover: cover_url,
+        brief_desc: text(&artist["briefDesc"]),
+        description: text(
+            data.get("user")
+                .and_then(|user| user.get("description"))
+                .or_else(|| data.get("detailDescription"))
+                .unwrap_or(&Value::Null),
+        ),
+        trans_names,
+        birthday: count(
+            data.get("user")
+                .and_then(|user| user.get("birthday"))
+                .unwrap_or(&Value::Null),
+        ),
+        music_size: count(&artist["musicSize"]),
+        album_size: count(&artist["albumSize"]),
+        mv_size: count(&artist["mvSize"]),
+    })
+}
+
+fn song_page_dto(raw: &Value) -> SongPage {
+    let source = payload(raw);
+    let songs = source
+        .get("songs")
+        .or_else(|| raw.get("songs"))
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().filter_map(song_dto).collect())
+        .unwrap_or_default();
+    let total = count(
+        source
+            .get("total")
+            .or_else(|| source.get("songCount"))
+            .or_else(|| source.get("count"))
+            .unwrap_or(&Value::Null),
+    );
+    let more = source
+        .get("more")
+        .or_else(|| source.get("hasMore"))
+        .map(flag)
+        .unwrap_or(false);
+    SongPage { songs, total, more }
+}
+
+fn album_list_dto(raw: &Value) -> (Vec<AlbumSummary>, bool) {
+    let source = payload(raw);
+    let albums = source
+        .get("hotAlbums")
+        .or_else(|| source.get("albums"))
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|album| {
+                    Some(AlbumSummary {
+                        mid: id_of(&album["id"])
+                            .or_else(|| id_of(&album["albumId"]))?,
+                        name: text(&album["name"]),
+                        cover: cover(&album["picUrl"]),
+                        publish_time: count(&album["publishTime"]),
+                        size: count(&album["size"]),
+                        artists: album
+                            .get("artists")
+                            .map(artists)
+                            .or_else(|| album.get("artist").map(|artist| artists(&json!([artist]))))
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let more = source
+        .get("more")
+        .or_else(|| source.get("hasMore"))
+        .map(flag)
+        .unwrap_or(false);
+    (albums, more)
+}
+
+fn playlist_info(raw: &Value, id: &str) -> Option<PlaylistInfo> {
+    let item = raw
+        .get("playlist")
+        .filter(|value| value.is_object())
+        .or_else(|| payload(raw).get("playlist").filter(|value| value.is_object()))?;
+    Some(PlaylistInfo {
+        id: id_of(&item["id"]).unwrap_or_else(|| id.to_owned()),
+        name: text(&item["name"]),
+        cover: cover(&item["coverImgUrl"]),
+        track_count: count(&item["trackCount"]),
+        description: text(&item["description"]),
+        creator: text(&item["creator"]["nickname"]),
+        update_time: count(&item["updateTime"]),
+    })
+}
+
+fn lyric_text(raw: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| raw.get(*key))
+        .filter_map(|value| {
+            value
+                .get("lyric")
+                .and_then(Value::as_str)
+                .or_else(|| value.as_str())
+        })
+        .find(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+}
+
+fn lyrics_dto(raw: &Value) -> Lyrics {
+    let source = payload(raw);
+    let raw = RawLyrics {
+        yrc: lyric_text(source, &["yrc"]).or_else(|| lyric_text(raw, &["yrc"])),
+        lrc: lyric_text(source, &["lrc"]).or_else(|| lyric_text(raw, &["lrc"])),
+        trans: lyric_text(source, &["tlyric", "trans"])
+            .or_else(|| lyric_text(raw, &["tlyric", "trans"])),
+        roma: lyric_text(source, &["romalrc", "roma"])
+            .or_else(|| lyric_text(raw, &["romalrc", "roma"])),
+        yroma: lyric_text(source, &["yromalrc", "yroma"])
+            .or_else(|| lyric_text(raw, &["yromalrc", "yroma"])),
+    };
+    let candidates = raw
+        .yrc
+        .as_ref()
+        .map(|text| Lyric { source: "yrc", text: text.clone() })
+        .into_iter()
+        .chain(raw.lrc.as_ref().map(|text| Lyric { source: "lrc", text: text.clone() }))
+        .collect();
+    Lyrics {
+        candidates,
+        raw_yrc: raw.yrc.is_some(),
+        raw_trans: raw.trans.is_some(),
+        raw_roma: raw.roma.is_some(),
+        raw,
+    }
+}
+
+fn suggest_dto(raw: &Value) -> ApiResult<Suggestions> {
+    let result = raw
+        .get("result")
+        .filter(|value| value.is_object())
+        .or_else(|| payload(raw).get("result").filter(|value| value.is_object()))
+        .ok_or_else(unavailable)?;
+    let songs = result
+        .get("songs")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|song| {
+                    let mid = id_of(&song["id"])
+                        .or_else(|| id_of(&song["mid"]))?;
+                    let name = {
+                        let relname = text(&song["relname"]);
+                        if relname.is_empty() {
+                            text(&song["name"])
+                        } else {
+                            relname
+                        }
+                    };
+                    let artist = song
+                        .get("artists")
+                        .map(artists)
+                        .or_else(|| song.get("ar").map(artists))
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|artist| artist.name)
+                        .collect::<Vec<_>>()
+                        .join(" / ");
+                    Some(SuggestSong { mid, name, artist })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let artists = result
+        .get("artists")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|artist| {
+                    let mid = id_of(&artist["id"])
+                        .or_else(|| id_of(&artist["mid"]))?;
+                    let avatar = cover(
+                        artist
+                            .get("picUrl")
+                            .or_else(|| artist.get("img1v1Url"))
+                            .unwrap_or(&Value::Null),
+                    );
+                    Some(ArtistSummary {
+                        mid,
+                        name: text(&artist["name"]),
+                        avatar,
+                        album_size: count(&artist["albumSize"]),
+                        mv_size: count(&artist["mvSize"]),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let albums = result
+        .get("albums")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|album| {
+                    let mid = id_of(&album["id"])
+                        .or_else(|| id_of(&album["albumId"]))?;
+                    let artist = album
+                        .get("artist")
+                        .and_then(|artist| artist.get("name"))
+                        .map(text)
+                        .unwrap_or_default();
+                    Some(SuggestAlbum {
+                        mid,
+                        name: text(&album["name"]),
+                        artist,
+                        cover: cover(&album["picUrl"]),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Suggestions { songs, artists, albums })
+}
+
+fn raw_lyrics_kind(kind: Option<&str>) -> ApiResult<&'static str> {
+    match kind {
+        Some("yrc") => Ok("yrc"),
+        Some("lrc") => Ok("lrc"),
+        Some("trans") => Ok("trans"),
+        Some("roma") => Ok("roma"),
+        Some("yroma") => Ok("yroma"),
+        _ => Err(bad()),
+    }
+}
+
+fn safe_basename(song: &Song) -> String {
+    let artists = song
+        .artists
+        .iter()
+        .map(|artist| artist.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let raw = match (artists.is_empty(), song.name.is_empty()) {
+        (false, false) => format!("{artists} - {}", song.name),
+        (false, true) => artists,
+        (true, false) => song.name.clone(),
+        (true, true) => song.id.clone(),
+    };
+    let mut base: String = raw
+        .chars()
+        .filter(|c| !c.is_control() && !"/\\:*?\"<>|".contains(*c))
+        .take(160)
+        .collect();
+    base = base.trim_matches(|c: char| c.is_whitespace() || c == '.').to_owned();
+    if base.is_empty() {
+        base = song.id.clone();
+    }
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
+        "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+        "LPT7", "LPT8", "LPT9",
+    ];
+    if RESERVED.contains(&base.to_ascii_uppercase().as_str()) {
+        base.push('_');
+    }
+    base
+}
+
+fn attachment(base: &str, ext: &str) -> String {
+    let name = format!("{base}.{ext}");
+    let encoded: String = name.bytes().map(|byte| format!("%{byte:02X}")).collect();
+    format!("attachment; filename=\"download.{ext}\"; filename*=UTF-8''{encoded}")
+}
+
+fn lyrics_disposition(song: &Song, kind: &str) -> String {
+    let (suffix, extension) = match kind {
+        "yrc" => ("", "yrc"),
+        "lrc" => ("", "lrc"),
+        "trans" => (".trans", "lrc"),
+        "roma" => (".roma", "lrc"),
+        "yroma" => (".yroma", "yrc"),
+        _ => unreachable!("validated raw lyric kind"),
+    };
+    attachment(&format!("{}{suffix}", safe_basename(song)), extension)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -1007,6 +1550,50 @@ fn audio_dto(raw: &Value, id: &str) -> ApiResult<Option<Audio>> {
 fn detail_params(id: &str) -> Value {
     json!({"c": json!([{"id": id.parse::<i64>().unwrap_or_default()}]).to_string()})
 }
+fn lyric_params(id: &str) -> Value {
+    json!({
+        "id": id,
+        "cp": false,
+        "tv": 0,
+        "lv": 0,
+        "rv": 0,
+        "kv": 0,
+        "yv": 0,
+        "ytv": 0,
+        "yrv": 0
+    })
+}
+fn album_params() -> Value {
+    json!({})
+}
+fn artist_detail_params(id: &str) -> Value {
+    json!({"id": id})
+}
+fn artist_songs_params(id: &str, limit: usize, offset: usize) -> Value {
+    json!({
+        "id": id,
+        "private_cloud": "true",
+        "work_type": 1,
+        "order": "hot",
+        "offset": offset,
+        "limit": limit
+    })
+}
+fn artist_album_params(limit: usize, offset: usize) -> Value {
+    json!({"limit": limit, "offset": offset, "total": true})
+}
+fn playlist_params(id: &str) -> Value {
+    json!({"id": id, "n": 100000, "s": 8})
+}
+fn suggest_params(term: &str) -> Value {
+    json!({"s": term})
+}
+fn album_path(id: &str) -> String {
+    format!("/api/v1/album/{id}")
+}
+fn artist_album_path(id: &str) -> String {
+    format!("/api/artist/albums/{id}")
+}
 fn play_params(id: &str, quality: Quality) -> Value {
     json!({"ids": format!("[{id}]"), "level": quality, "encodeType": "flac"})
 }
@@ -1016,6 +1603,27 @@ struct SearchQuery {
     kind: Option<SearchKind>,
     limit: Option<usize>,
     offset: Option<usize>,
+}
+#[derive(Deserialize)]
+struct SuggestQuery {
+    q: String,
+}
+#[derive(Default, Deserialize)]
+struct PageQuery {
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+impl PageQuery {
+    fn page(&self, default: usize) -> (usize, usize) {
+        (
+            self.limit.unwrap_or(default).clamp(1, 100),
+            self.offset.unwrap_or(0).min(10000),
+        )
+    }
+}
+#[derive(Default, Deserialize)]
+struct RawLyricsQuery {
+    kind: Option<String>,
 }
 #[derive(Default, Deserialize)]
 struct QualityQuery {
@@ -1028,9 +1636,17 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/ncm/capabilities", get(capabilities))
         .route("/ncm/search", get(search))
+        .route("/ncm/suggest", get(suggest))
+        .route("/ncm/album/:id", get(album))
+        .route("/ncm/artist/:id", get(artist))
+        .route("/ncm/artist/:id/songs", get(artist_songs))
+        .route("/ncm/artist/:id/albums", get(artist_albums))
+        .route("/ncm/playlist/:id", get(playlist))
         .route("/ncm/song/:id", get(info))
         .route("/ncm/song/:id/qualities", get(qualities))
         .route("/ncm/song/:id/play", get(play))
+        .route("/ncm/song/:id/lyrics", get(lyrics))
+        .route("/ncm/song/:id/lyrics/raw", get(raw_lyrics))
 }
 async fn capabilities() -> Json<Value> {
     Json(json!({"enabled": true, "qualities": QUALITIES.map(QualityCapability::new)}))
@@ -1055,6 +1671,223 @@ async fn search(
     let data = search_dto(&raw, kind)?;
     ncm.searches.put(key, data.clone(), 600);
     Ok(Json(data))
+}
+async fn suggest(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SuggestQuery>,
+) -> ApiResult<Json<Suggestions>> {
+    let term = query.q.trim();
+    if term.is_empty() || term.len() > 512 {
+        return Err(bad());
+    }
+    let ncm = adapter(&state);
+    if let Some(data) = ncm.suggestions.get(term) {
+        return Ok(Json(data));
+    }
+    let raw = ncm
+        .request(SUGGEST_PATH, suggest_params(term), Crypto::Weapi)
+        .await?;
+    let data = suggest_dto(&raw)?;
+    ncm.suggestions.put(term.to_owned(), data.clone(), 600);
+    Ok(Json(data))
+}
+async fn album(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<AlbumPage>> {
+    check_id(&id)?;
+    let raw = adapter(&state)
+        .request(&album_path(&id), album_params(), Crypto::Weapi)
+        .await?;
+    Ok(Json(album_dto(&raw, &id)?))
+}
+async fn artist(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ArtistPage>> {
+    check_id(&id)?;
+    let ncm = adapter(&state);
+    let detail = ncm.request(ARTIST_DETAIL_PATH, artist_detail_params(&id), Crypto::Eapi);
+    let songs = ncm.request(ARTIST_SONGS_PATH, artist_songs_params(&id, 50, 0), Crypto::Eapi);
+    let albums_path = artist_album_path(&id);
+    let albums = ncm.request(
+        &albums_path,
+        artist_album_params(30, 0),
+        Crypto::Weapi,
+    );
+    let (detail, songs, albums) = tokio::join!(detail, songs, albums);
+    let artist = artist_detail_dto(&detail?, &id)?;
+    let songs = songs.map(|raw| song_page_dto(&raw)).unwrap_or(SongPage {
+        songs: Vec::new(),
+        total: 0,
+        more: false,
+    });
+    let (albums, more_albums) = albums
+        .map(|raw| album_list_dto(&raw))
+        .unwrap_or_default();
+    Ok(Json(ArtistPage {
+        artist,
+        songs: songs.songs,
+        total_songs: songs.total,
+        more_songs: songs.more,
+        albums,
+        more_albums,
+        mvs: Vec::new(),
+        more_mvs: false,
+    }))
+}
+async fn artist_songs(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<SongPage>> {
+    check_id(&id)?;
+    let (limit, offset) = page.page(50);
+    let raw = adapter(&state)
+        .request(
+            ARTIST_SONGS_PATH,
+            artist_songs_params(&id, limit, offset),
+            Crypto::Eapi,
+        )
+        .await?;
+    Ok(Json(song_page_dto(&raw)))
+}
+async fn artist_albums(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<AlbumList>> {
+    check_id(&id)?;
+    let (limit, offset) = page.page(30);
+    let raw = adapter(&state)
+        .request(
+            &artist_album_path(&id),
+            artist_album_params(limit, offset),
+            Crypto::Weapi,
+        )
+        .await?;
+    let (albums, more) = album_list_dto(&raw);
+    Ok(Json(AlbumList { albums, more }))
+}
+async fn playlist(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(page): Query<PageQuery>,
+) -> ApiResult<Json<PlaylistPage>> {
+    check_id(&id)?;
+    let (limit, offset) = page.page(100);
+    let ncm = adapter(&state);
+    let detail = ncm
+        .request(PLAYLIST_DETAIL_PATH, playlist_params(&id), Crypto::Eapi)
+        .await?;
+    let info = playlist_info(&detail, &id);
+    let track_ids = detail
+        .pointer("/playlist/trackIds")
+        .or_else(|| detail.pointer("/data/playlist/trackIds"))
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| id_of(&row["id"]))
+                .skip(offset)
+                .take(limit)
+                .filter_map(|id| id.parse::<i64>().ok())
+                .map(|id| json!({"id": id}))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let inline_songs = detail
+        .pointer("/playlist/tracks")
+        .or_else(|| detail.pointer("/data/playlist/tracks"))
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .skip(offset)
+                .take(limit)
+                .filter_map(song_dto)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let songs = if track_ids.is_empty() {
+        inline_songs
+    } else {
+        let raw = ncm
+            .request(
+                DETAIL_PATH,
+                json!({"c": serde_json::to_string(&track_ids).unwrap_or_else(|_| "[]".into())}),
+                Crypto::Eapi,
+            )
+            .await?;
+        payload(&raw)
+            .get("songs")
+            .or_else(|| raw.get("songs"))
+            .and_then(Value::as_array)
+            .map(|rows| rows.iter().filter_map(song_dto).collect())
+            .unwrap_or_default()
+    };
+    let more = songs.len() >= limit
+        && info.as_ref().is_none_or(|info| {
+            info.track_count == 0 || ((offset + songs.len()) as u64) < info.track_count
+        });
+    Ok(Json(PlaylistPage {
+        playlist: info,
+        songs,
+        more,
+    }))
+}
+async fn fetch_lyrics(ncm: &Ncm, id: &str) -> ApiResult<(Lyrics, u64)> {
+    let raw = ncm.request(LYRIC_PATH, lyric_params(id), Crypto::Weapi).await?;
+    let lyrics = lyrics_dto(&raw);
+    let ttl = if lyrics.candidates.is_empty() {
+        3600
+    } else {
+        604800
+    };
+    Ok((lyrics, ttl))
+}
+async fn lyrics(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Lyrics>> {
+    check_id(&id)?;
+    let ncm = adapter(&state);
+    if let Some(data) = ncm.lyrics.get(&id) {
+        return Ok(Json(data));
+    }
+    let (data, ttl) = fetch_lyrics(ncm, &id).await?;
+    ncm.lyrics.put(id, data.clone(), ttl);
+    Ok(Json(data))
+}
+async fn raw_lyrics(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<RawLyricsQuery>,
+) -> ApiResult<Response> {
+    check_id(&id)?;
+    let kind = raw_lyrics_kind(query.kind.as_deref())?;
+    let ncm = adapter(&state);
+    let data = if let Some(data) = ncm.lyrics.get(&id) {
+        data
+    } else {
+        let (data, ttl) = fetch_lyrics(ncm, &id).await?;
+        ncm.lyrics.put(id.clone(), data.clone(), ttl);
+        data
+    };
+    let text = match kind {
+        "yrc" => data.raw.yrc,
+        "lrc" => data.raw.lrc,
+        "trans" => data.raw.trans,
+        "roma" => data.raw.roma,
+        "yroma" => data.raw.yroma,
+        _ => unreachable!("validated raw lyric kind"),
+    }
+    .ok_or_else(missing)?;
+    let song = detail_dto(&ncm.detail(&id).await?, &id)?.song;
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::CONTENT_DISPOSITION, lyrics_disposition(&song, kind))
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(axum::body::Body::from(text))
+        .unwrap())
 }
 async fn info(
     State(state): State<Arc<AppState>>,
