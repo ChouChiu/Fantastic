@@ -127,7 +127,8 @@ const ARTIST_SONGS_PATH: &str = "/api/v1/artist/songs";
 const PLAYLIST_DETAIL_PATH: &str = "/api/v6/playlist/detail";
 const SUGGEST_PATH: &str = "/api/search/suggest/web";
 const WEB_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0";
-const APP_UA: &str = "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)";
+const DESKTOP_APPVER: &str = "3.1.17.204416";
+const APP_UA: &str = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.1.17.204416";
 
 struct Cookie {
     value: String,
@@ -272,7 +273,7 @@ fn anonymous_cookies() -> CookieJar {
     let cookies = CookieJar::default();
     for (name, value) in [
         ("os", "pc"),
-        ("appver", "3.1.17.204416"),
+        ("appver", DESKTOP_APPVER),
         (
             "osver",
             "Microsoft-Windows-10-Professional-build-19045-64bit",
@@ -1509,10 +1510,7 @@ fn quality_candidates(song: &Value, privilege: &Value) -> Vec<Quality> {
                     return false;
                 }
             }
-            if cap.is_none() && br.is_none() && *q > Quality::Exhigh {
-                return false;
-            }
-            true
+            !(cap.is_none() && br.is_none() && *q > Quality::Exhigh)
         })
         .collect()
 }

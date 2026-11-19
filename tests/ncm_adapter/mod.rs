@@ -484,6 +484,15 @@ fn request_origins_modes_headers_and_params_match_reference() {
     }
     assert!(format!("{:?}", ncm.api).contains("Policy(None)"));
 }
+
+#[test]
+fn desktop_eapi_ua_matches_anonymous_appver() {
+    let cookies = anonymous_cookies().values(&MUSIC.parse().unwrap());
+    let ua_version = APP_UA.rsplit_once('/').map(|(_, version)| version);
+    assert_eq!(ua_version, Some(cookies["appver"].as_str()));
+    assert_eq!(cookies["appver"], DESKTOP_APPVER);
+}
+
 #[test]
 fn cookie_file_is_optional_private_and_invalid_content_is_redacted() {
     assert!(Ncm::new(Some(FilePath::new("/nonexistent-ncm-cookie-file"))).is_ok());
