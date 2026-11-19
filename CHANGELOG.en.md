@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 🐛 Update the bundled AMLL lyric core to fork master `1682096`: the script-boundary (CJK/Hangul vs Latin) break reward is now its own constant at 0.85 (it previously shared punctuation's 0.6, leaving only a 0.20W² edge that greedy fill slack could cancel — e.g. "무리해도 Can't touch that" broke after "Can't"); mixed-script lines now reliably break at the language boundary, without emptying the first line when the boundary comes very early.
 - 🐛 Update the bundled AMLL lyric core to fork master `5e106e6`: fix mixed-script lines not breaking at the script boundary when transliteration is on — a word element's text is the original word plus its romanization (e.g. "더deo"), and the breaker previously classified the preceding word by its last character, i.e. the romanization's Latin script; it now classifies by the first character.
 - 🐛 Update the bundled AMLL lyric core to fork master `b02c59e`: break rewards now recognize trailing whitespace on word elements, so mixed Korean/Chinese–Latin lines break at script boundaries in dynamic lyrics too (the cross-script reward could never fire when spaces were glued to words).
 - 🔄 Update the bundled AMLL lyric core to fork master `283a27e`, merging upstream PR #639's balanced line breaking for mixed Chinese–Latin lyrics.
