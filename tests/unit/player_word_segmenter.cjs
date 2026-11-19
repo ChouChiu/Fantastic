@@ -203,7 +203,7 @@ test('optional Jieba failure still installs cjdict, while both fetches start in 
 test('vendored AMLL balances the reported song at phone-like widths', async () => {
   const { createWordSegmenter } = await api;
   const source = readFileSync(`${__dirname}/../../web/lyrics/amll-core.mjs`, 'utf8');
-  const constants = source.match(/(\w+=1e3,\w+=\.7,\w+=\.15,\w+=\.35,\w+=\.5,\w+=\.4,\w+=\.6,\w+=\/.*?\/);function (\w+)\(/u);
+  const constants = source.match(/(\w+=1e3,\w+=\.7,\w+=\.15,\w+=\.35,\w+=\.5,\w+=\.4,\w+=\.6,\w+=\.85,\w+=\/.*?\/);function (\w+)\(/u);
   assert(constants, 'locate the actual vendored balancer, including its penalty constants');
   const start = source.indexOf(`function ${constants[2]}(`);
   let end = source.indexOf('{', start);
