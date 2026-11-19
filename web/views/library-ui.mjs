@@ -193,6 +193,8 @@ export function trackRow(track, { actions, onPlay, extraItems, playlistId, lead 
       ...(track.source === 'qq' ? [el('span', { className: 'qq-badge', textContent: t('source.qq') }),
         ...(track.qq?.vip ? [el('span', { className: 'qq-badge qq-vip', textContent: t('qq.vip') })] : []),
         ...(track.qq?.ttml ? [el('span', { className: 'qq-badge', textContent: t('qq.ttml') })] : [])] : []),
+      ...(track.source === 'ncm' ? [el('span', { className: 'qq-badge', textContent: t('source.ncm') }),
+        ...(track.ncm?.vip || track.vip ? [el('span', { className: 'qq-badge qq-vip', textContent: t('qq.vip') })] : [])] : []),
       track.explicit ? el('span', { className: 'explicit', textContent: 'E', title: t('search.explicit') }) : null,
       library.isFavorite(track.kind, track.id, track.source) ? el('span', { className: 'lib-fav', innerHTML: LIB_ICON.starFilled, title: t('library.favorited') }) : null,
       video ? el('span', { className: 'track-kind', innerHTML: VIDEO_ICON, title: t('album.video') }) : null),
@@ -206,7 +208,7 @@ export function trackRow(track, { actions, onPlay, extraItems, playlistId, lead 
   const row = el('div', { className: `track pl-track lib-track${video ? ' video' : ''}${lead ? ' has-lead' : ''}` },
     lead || null, cover, main, albumCol,
     el('span', { className: 'track-time', textContent: track.duration ? formatTime(track.duration / 1000) : '' }), more);
-  if (track.source === 'qq' && track.href) {
+  if (['qq', 'ncm'].includes(track.source) && track.href) {
     row.addEventListener('click', (event) => {
       if (event.target.closest('a, button')) return;
       title.click();

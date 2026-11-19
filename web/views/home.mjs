@@ -7,6 +7,7 @@ import { parseAppleLink } from './links.mjs';
 import { createResults, toItem, el, artNode, explicitBadge, KIND_LABELS } from './search-results.mjs';
 import { loadCategories, brickNode, brickSkeletons } from './categories.mjs';
 import * as qq from '../sources/qq.mjs';
+import * as ncm from '../sources/ncm.mjs';
 
 const { AmI18n } = window;
 const { t } = AmI18n;
@@ -33,21 +34,26 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
   let errorKey = null;
 
   /* ---------- 搜索音源（Apple Music / QQ 音乐）：只影响搜索，播放来源只随 play / playQueue 改变，回到首页不会打断其他来源的歌曲 ---------- */
+  const allowedSource = (value) => value === 'qq' && qq.enabled() ? 'qq' : value === 'ncm' && ncm.enabled() ? 'ncm' : 'apple';
   let source = 'apple';
-  try { source = qq.enabled() && (new URL(location.href).searchParams.get('source') || localStorage.getItem('am-hook:source')) === 'qq' ? 'qq' : 'apple'; } catch {}
+  try { source = allowedSource(new URL(location.href).searchParams.get('source') || localStorage.getItem('am-hook:source')); } catch {}
   function applySource() {
-    $('source-switch').hidden = !qq.enabled();
+    $('source-switch').hidden = !qq.enabled() && !ncm.enabled();
+    for (const option of $('source-select').options) {
+      if (option.value === 'qq') option.hidden = option.disabled = !qq.enabled();
+      if (option.value === 'ncm') option.hidden = option.disabled = !ncm.enabled();
+    }
     $('source-select').value = source;
-    $('storefront').hidden = source === 'qq';
+    $('storefront').hidden = source !== 'apple';
     // 示例链接、类别浏览与音质说明都是 Apple Music 的
-    for (const node of root.querySelectorAll('.examples, .formats-section')) node.hidden = source === 'qq';
-    $('categories').hidden = source === 'qq' || categoriesEmpty;
-    input.dataset.i18nAttr = source === 'qq' ? 'placeholder=qq.placeholder' : 'placeholder=home.placeholder';
-    input.placeholder = t(source === 'qq' ? 'qq.placeholder' : 'home.placeholder');
+    for (const node of root.querySelectorAll('.examples, .formats-section')) node.hidden = source !== 'apple';
+    $('categories').hidden = source !== 'apple' || categoriesEmpty;
+    input.dataset.i18nAttr = source === 'ncm' ? 'placeholder=ncm.placeholder' : source === 'qq' ? 'placeholder=qq.placeholder' : 'placeholder=home.placeholder';
+    input.placeholder = t(source === 'ncm' ? 'ncm.placeholder' : source === 'qq' ? 'qq.placeholder' : 'home.placeholder');
     try { localStorage.setItem('am-hook:source', source); } catch {}
   }
   $('source-select').addEventListener('change', () => {
-    source = $('source-select').value === 'qq' ? 'qq' : 'apple';
+    source = allowedSource($('source-select').value);
     closeSuggest();
     const url = new URL(location.href);
     url.searchParams.set('source', source);
@@ -63,7 +69,7 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
 
   // wrapper-lite 状态由 app.mjs 维护（导航里的状态胶囊），进入首页时重新检查；没有选择过主地区时以账号所在地区为准，搜索与类别等它返回。
   // 搜索 QQ 音乐时不需要，第一次用到 Apple Music 时才检查
-  let statusReady = source === 'qq' ? null : loadStatus();
+  let statusReady = source !== 'apple' ? null : loadStatus();
   const ready = () => (statusReady ||= loadStatus());
 
   const results = createResults({
@@ -131,7 +137,7 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
     if (suggestController) suggestController.abort();
     const term = input.value.trim();
     if (!term || (source === 'apple' && (parseAppleLink(term) || isUrlLike(term)))) { closeSuggest(); return; }
-    suggestTimer = setTimeout(() => (source === 'qq' ? loadQQSuggest(term) : loadSuggest(term)), 180);
+    suggestTimer = setTimeout(() => (source !== 'apple' ? loadQQSuggest(term) : loadSuggest(term)), 180);
   }
 
   async function loadSuggest(term) {
@@ -204,18 +210,20 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
 
   /** QQ 音乐的输入联想：歌曲为补全词，艺人与专辑直达页面 */
   async function loadQQSuggest(term) {
+    const requestedSource = source;
+    const adapter = source === 'ncm' ? ncm : qq;
     const controller = suggestController = new AbortController();
     try {
-      const data = await qq.suggest(term, controller.signal);
-      if (controller !== suggestController || document.activeElement !== input || source !== 'qq') return;
+      const data = await adapter.suggest(term, controller.signal);
+      if (controller !== suggestController || document.activeElement !== input || source !== requestedSource) return;
       showSuggest([
         ...data.songs.slice(0, 5).map((song) => termOption(term, [song.name, song.artist].filter(Boolean).join(' - '), [song.name, song.artist].filter(Boolean).join(' '))),
         ...data.artists.slice(0, 3).map((artist) => resultOption({
-          href: qq.artistPath(artist.mid), title: artist.name, sub: t('home.detectArtist'),
+          href: adapter.artistPath(artist.mid), title: artist.name, sub: t('home.detectArtist'),
           art: artUrl(artist.avatar, 80, 80), artClass: 'suggest-art round',
         })),
         ...data.albums.slice(0, 3).map((album) => resultOption({
-          href: qq.albumPath(album.mid), title: album.name, sub: [t('home.detectAlbum'), album.artist].filter(Boolean).join(' · '),
+          href: adapter.albumPath(album.mid), title: album.name, sub: [t('home.detectAlbum'), album.artist].filter(Boolean).join(' · '),
           art: artUrl(album.cover, 80, 80),
         })),
       ]);
@@ -281,7 +289,7 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
     if (history) {
       const url = new URL(location.href);
       url.searchParams.set('q', term);
-      if (qq.enabled()) url.searchParams.set('source', source);
+      if (qq.enabled() || ncm.enabled()) url.searchParams.set('source', source);
       if (url.href !== location.href) {
         if (history === 'push') window.history.pushState(null, '', url);
         else window.history.replaceState(window.history.state, '', url);
@@ -310,7 +318,7 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
   function syncFromUrl() {
     if (location.pathname !== '/') return; // 正在离开首页
     const params = new URL(location.href).searchParams;
-    const nextSource = qq.enabled() && params.get('source') === 'qq' ? 'qq' : params.has('source') ? 'apple' : source;
+    const nextSource = params.has('source') ? allowedSource(params.get('source')) : source;
     const changed = source !== nextSource;
     source = nextSource; applySource();
     if (changed && source === 'apple' && !categoriesLoaded) renderCategories();
@@ -435,7 +443,7 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
   signal.addEventListener('abort', () => gridObserver.disconnect(), { once: true });
 
   async function renderCategories() {
-    if (source === 'qq') return;
+    if (source !== 'apple') return;
     const token = ++categoriesToken;
     categoriesLoaded = true;
     categoriesEmpty = false;

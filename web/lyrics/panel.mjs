@@ -23,6 +23,7 @@
  * 待播清单打开时占据歌词的位置。
  */
 import { parseTTML, duetSides } from './ttml.mjs';
+import { lyrics as ncmLyrics } from '../sources/ncm.mjs';
 import { lyrics as qqLyrics, LYRIC_PRIORITY, QRC_LYRIC_PRIORITY } from '../sources/qq.mjs';
 import {
   DomLyricPlayer,
@@ -882,6 +883,7 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
 
   /** 选定的来源没有这首歌的歌词、改用另一来源时的说明 */
   function sourceNote() {
+    if (trackSource === 'ncm') return t('qq.lyricsSource', { source: (lyricsSource || 'YRC → LRC').toUpperCase() });
     if (trackSource === 'qq') {
       return lyricsSource ? t('qq.lyricsSource', { source: lyricsSource.toUpperCase() })
         : t('qq.lyricsPriority', { order: (prefs.qqSource === 'qrc' ? QRC_LYRIC_PRIORITY : LYRIC_PRIORITY).map((s) => s.toUpperCase()).join(' → ') });
@@ -896,8 +898,9 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
     if (!lyricsText) return;
     const meta = getMeta();
     const name = safeName([meta.artist, meta.title].filter(Boolean).join(' - ')) || adamId;
-    const url = URL.createObjectURL(new Blob([lyricsText], { type: 'application/ttml+xml' }));
-    const a = Object.assign(document.createElement('a'), { href: url, download: `${name}.ttml` });
+    const extension = trackSource === 'ncm' ? lyricsSource : 'ttml';
+    const url = URL.createObjectURL(new Blob([lyricsText], { type: trackSource === 'ncm' ? 'text/plain' : 'application/ttml+xml' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${name}.${extension}` });
     a.style.display = 'none';
     document.body.append(a);
     a.click();
@@ -1204,7 +1207,7 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
       separator(),
       menuItem(menuNode('span', '', t('lyrics.source')), 'presentation', 'lyrics-menu-heading'),
       // QQ 的歌曲另存一项（prefs.qqSource）：'amll' 为 AMLL 歌词库优先（默认），'qrc' 为 QQ 的 QRC 优先
-      ...(trackSource === 'qq' ? ['amll', 'qrc'] : ['apple', 'amll']).map((source) => {
+      ...(trackSource === 'ncm' ? [] : trackSource === 'qq' ? ['amll', 'qrc'] : ['apple', 'amll']).map((source) => {
         const selected = (trackSource === 'qq' ? prefs.qqSource : prefs.source) === source;
         return menuItem(menuButton({
           label: t({ apple: 'lyrics.sourceApple', amll: 'lyrics.sourceAmll', qrc: 'lyrics.sourceQrc' }[source]),
@@ -1377,6 +1380,7 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
    * 选了 AMLL 歌词库时先查它，未收录、请求失败或解析不了时记下原因，改用 Apple Music 歌词。
    */
   async function loadLyrics(id) {
+    if (trackSource === 'ncm') return ncmLyrics(id, parseWithUiLanguage);
     if (trackSource === 'qq') return qqLyrics(id, parseWithUiLanguage, undefined, prefs.qqSource);
     // 这首歌各来源的结果记在 sources 里，来回切换来源时不重复请求；AMLL 歌词库未收录时不记，下次选择时重新查
     const cache = sources;
@@ -1697,7 +1701,7 @@ export function mountLyrics({ root, toggle, bar, player, getMeta, t, notify, onL
   });
   onLangChange(() => {
     if (song && lyricsText) {
-      song = parseWithUiLanguage(lyricsText);
+      if (song.source !== 'ncm') song = parseWithUiLanguage(lyricsText);
       renderSong();
     }
     renderCredits();

@@ -16,6 +16,7 @@ import { LIB_ICON, playlistMenuItems, moveMenuItems, setPlayButton } from './lib
 export { setPlayButton };
 import { downloads } from '../download/downloads.mjs';
 import * as qq from '../sources/qq.mjs';
+import * as ncm from '../sources/ncm.mjs';
 import { amp, artUrl } from '../amp.mjs';
 
 const { AmI18n } = window;
@@ -181,7 +182,7 @@ export function songEntry(track, country, context = {}) {
  * 先用播放队列里的信息拼出曲目快照（封面地址还原为 {w}x{h} 模板），之后可用 songTarget() 换成完整资源
  */
 export function nowPlayingTarget(current) {
-  if (current?.source === 'qq') return { kind: 'song', source: 'qq', name: current.title || current.name, noPlay: true,
+  if (['qq', 'ncm'].includes(current?.source)) return { kind: 'song', source: current.source, name: current.title || current.name, noPlay: true,
     href: current.href || '', albumHref: current.albumHref || '',
     track: { ...current, id: current.track, name: current.title || current.name, duration: (current.duration || 0) * 1000 } };
   if (!current || !current.track) return null;
@@ -293,13 +294,14 @@ function collectionSnapshots(c) {
 }
 
 /** QQ 音乐条目（歌曲、专辑、艺人、歌单、MV）：source 为 qq，或曲目快照来自 QQ */
-const isQQ = (target) => target.source === 'qq' || target.track?.source === 'qq';
+const adapterOf = (target) => target.source === 'ncm' || target.track?.source === 'ncm' ? ncm : qq;
+const isAdapter = (target) => ['qq', 'ncm'].includes(target.source) || ['qq', 'ncm'].includes(target.track?.source);
 
 /** 条目在资料库中的 kind、id 与 source；不能加入资料库的条目为 null（QQ 音乐只有歌曲可以加入） */
 function libraryKey(target) {
-  if (isQQ(target)) {
+  if (isAdapter(target)) {
     const id = target.track && (target.track.track ?? target.track.id);
-    return target.kind === 'song' && id ? { kind: 'song', id: String(id), source: 'qq' } : null;
+    return target.kind === 'song' && id ? { kind: 'song', id: String(id), source: target.source || target.track.source } : null;
   }
   if (!['song', 'music-video', 'album', 'playlist'].includes(target.kind)) return null;
   if (target.track) return { kind: target.track.kind, id: target.track.id };
@@ -312,7 +314,7 @@ function libraryKey(target) {
  * 喜爱用的键：本地歌单为 { local: true, id }，艺人为 { kind: 'artist', id }，其余与 libraryKey 相同；不能喜爱时为 null
  */
 function favoriteKey(target) {
-  if (isQQ(target)) return libraryKey(target);
+  if (isAdapter(target)) return libraryKey(target);
   if (target.kind === 'library-playlist') return target.playlistId ? { local: true, id: target.playlistId } : null;
   if (target.kind === 'artist') {
     const id = target.resource ? target.resource.id : ((target.href || '').match(/\/(\d+)$/) || [])[1];
@@ -345,9 +347,20 @@ async function addTargetToLibrary(target) {
   return library.addToLibrary(await libraryRecords(target));
 }
 
+async function ncmCollectionEntries(target) {
+  const id = (target.href || '').match(/^\/ncm-(?:album|playlist)\/([1-9][0-9]{0,18})\/?$/)?.[1];
+  if (!id) return [];
+  const songs = target.kind === 'album' ? ((await ncm.album(id)).songs || []).map(ncm.toTrack) : (await ncm.playlist(id)).songs;
+  return songs.map(ncm.entryOf);
+}
+
 /** 要加入歌单的曲目快照 */
 async function targetTracks(target) {
   if (target.getTracks) return target.getTracks();
+  if (adapterOf(target) === ncm && ['album', 'playlist'].includes(target.kind)) {
+    const entries = await ncmCollectionEntries(target);
+    return entries.map((e) => ({ ...e, artwork: { url: e.artwork } }));
+  }
   if (target.kind === 'song' || target.kind === 'music-video') {
     const track = target.track || (target.resource && snapshotOf(target.resource, target.country));
     return track ? [track] : [];
@@ -539,7 +552,7 @@ export function createActions({ signal, player, navigate, toast }) {
   const playable = (target) => ['song', 'album', 'playlist', 'music-video', 'library-playlist'].includes(target.kind)
     && (target.kind !== 'song' || target.onPlay || target.resource || target.track)
     && (target.kind !== 'library-playlist' || !!target.onPlay)
-    && (!isQQ(target) || target.kind !== 'artist');
+    && (!isAdapter(target) || target.kind !== 'artist');
 
   /** QQ 专辑 / 歌单的全部歌曲（歌单只取第一页） */
   async function qqCollectionEntries(target) {
@@ -554,11 +567,11 @@ export function createActions({ signal, player, navigate, toast }) {
   async function play(target, button, shuffle = false) {
     if (target.kind === 'music-video') { navigate(target.href); return; }
     if (target.onPlay) { target.onPlay(); return; }
-    if (target.kind === 'song') { player.playQueue([target.resource ? songEntry(target.resource, target.country) : (target.track?.qq ? qq.entryOf(target.track) : library.entryOf(target.track))], 0); return; }
+    if (target.kind === 'song') { player.playQueue([target.resource ? songEntry(target.resource, target.country) : (target.track?.source === 'ncm' ? ncm.entryOf(target.track) : target.track?.qq ? qq.entryOf(target.track) : library.entryOf(target.track))], 0); return; }
     if (button) button.classList.add('busy');
     try {
       // 离开页面后取回的曲目照样播放：播放条常驻
-      const entries = isQQ(target) ? await qqCollectionEntries(target) : await collectionEntries(target);
+      const entries = isAdapter(target) ? await (adapterOf(target) === ncm ? ncmCollectionEntries(target) : qqCollectionEntries(target)) : await collectionEntries(target);
       if (!entries.length) { toast(t('action.noSongs', { name: target.name })); return; }
       player.playQueue(entries, shuffle ? Math.floor(Math.random() * entries.length) : 0, { shuffle });
     } catch (err) {
@@ -649,15 +662,16 @@ export function createActions({ signal, player, navigate, toast }) {
 
   /** 复制本站链接与 Apple Music / QQ 音乐链接（按键名）；本地歌单没有 Apple Music 链接 */
   function linkEntries(target) {
-    if (isQQ(target)) {
+    if (isAdapter(target)) {
+      const adapter = adapterOf(target);
       const href = target.href || target.track?.href || '';
-      const web = qq.webUrl(href);
+      const web = adapter.webUrl(href);
       if (!href || !web) return {};
       const site = location.origin + href;
       return {
         copySite: { icon: ICON.link, label: t('action.copySite'), title: site, onSelect: () => copy(site) },
-        openQQ: { icon: ICON.link, label: t('qq.openWeb'), onSelect: () => window.open(web, '_blank', 'noopener') },
-        copyApple: { icon: ICON.link, label: t('qq.copyLink'), title: web, onSelect: () => copy(web) },
+        openQQ: { icon: ICON.link, label: t(adapter === ncm ? 'ncm.openWeb' : 'qq.openWeb'), onSelect: () => window.open(web, '_blank', 'noopener') },
+        copyApple: { icon: ICON.link, label: t(adapter === ncm ? 'ncm.copyLink' : 'qq.copyLink'), title: web, onSelect: () => copy(web) },
       };
     }
     if (!target.href || !target.apple) return {};
@@ -670,6 +684,7 @@ export function createActions({ signal, player, navigate, toast }) {
 
   /** QQ 音乐条目的菜单：播放、音质与下载、前往专辑 / 艺人 / MV、资料库操作、复制链接 */
   function qqMenuItems(target, button) {
+    const adapter = adapterOf(target);
     const items = [];
     const track = target.kind === 'song' ? target.track : null;
     if (target.kind === 'music-video') items.push({ icon: ICON.video, label: t('action.playMv'), onSelect: () => navigate(target.href) });
@@ -679,9 +694,9 @@ export function createActions({ signal, player, navigate, toast }) {
     }
     if (track) {
       const id = track.track ?? track.id;
-      const href = track.href || qq.songPath(id);
+      const href = track.href || adapter.songPath(id);
       if (location.pathname !== href) items.push({ icon: ICON.quality, label: t('album.quality'), onSelect: () => navigate(href) });
-      items.push({ icon: ICON.download, label: t('qq.download'), onSelect: () => qq.download(track) });
+      items.push({ icon: ICON.download, label: t('qq.download'), onSelect: () => adapter.download(track) });
       const albumHref = target.albumHref || track.albumHref;
       if (albumHref && location.pathname !== albumHref) items.push({ icon: ICON.album, label: t('action.goAlbum'), onSelect: () => navigate(albumHref) });
       const artist = (track.artists || []).find((a) => a && a.href && location.pathname !== a.href);
@@ -697,7 +712,7 @@ export function createActions({ signal, player, navigate, toast }) {
   }
 
   function menuItems(target, button) {
-    if (isQQ(target)) return qqMenuItems(target, button);
+    if (isAdapter(target)) return qqMenuItems(target, button);
     const items = [];
     if (target.kind === 'music-video') items.push({ icon: ICON.video, label: t('action.playMv'), onSelect: () => navigate(target.href) });
     else if (playable(target) && !target.noPlay) items.push({ icon: ICON.play, label: t('action.play'), onSelect: () => play(target, button) });

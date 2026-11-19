@@ -29,6 +29,7 @@ pub async fn fallback_handler(uri: Uri, headers: HeaderMap) -> Response<Body> {
     let path = normalized.as_str();
     if crate::links::is_regionless_link(path)
         || crate::links::is_qq_link(path)
+        || crate::links::is_ncm_link(path)
         || parse_song_link(path).is_ok()
         || parse_mv_link(path).is_ok()
         || parse_post_link(path).is_ok()

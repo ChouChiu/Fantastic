@@ -55,7 +55,7 @@ export function libraryAlbums() {
     let album = albums.get(key);
     if (!album) {
       album = {
-        ...(track.source === 'qq' ? { source: 'qq' } : {}),
+        ...(['qq', 'ncm'].includes(track.source) ? { source: track.source } : {}),
         kind: 'album', id: track.albumId, name: track.album, artist: track.artist, artistHref: '', href: track.albumHref,
         artwork: track.artwork, country: track.country, addedAt: track.addedAt, tracks: [],
       };
@@ -280,8 +280,8 @@ export function mount({ root, url, signal, player, navigate, toast, onLangChange
   function albumCard(album) {
     return card({
       href: album.href, art: img(album.artwork, 360), title: album.name, sub: album.artist,
-      target: album.source === 'qq'
-        ? { kind: 'album', source: 'qq', href: album.href, name: album.name }
+      target: ['qq', 'ncm'].includes(album.source)
+        ? { kind: 'album', source: album.source, href: album.href, name: album.name }
         : { kind: 'album', href: album.href, apple: library.appleUrl(album.href), name: album.name, country: album.country },
     });
   }

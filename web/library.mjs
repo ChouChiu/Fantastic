@@ -1,3 +1,5 @@
+import { sourceOf } from './sources/track.mjs';
+import { fromSnapshot as ncmSnapshot, entryOf as ncmEntry } from './sources/ncm.mjs';
 // 资料库与歌单（与 music.apple.com 的「资料库」「歌单」相同），全部保存在本浏览器的 IndexedDB 中，服务端不保存任何数据。
 // 启动时整库读入内存，读取都是同步的；修改先改内存、立即通知界面，再写入 IndexedDB；
 // 同一浏览器的其他标签页经 BroadcastChannel 收到通知后重新读取。IndexedDB 不可用时（如部分隐私模式）只保存在内存中，
@@ -54,6 +56,7 @@ const CATALOG_PLAYLIST_ID = /^pl\.[0-9A-Za-z_-]{1,64}$/;
 const NUMERIC_ID = /^[0-9]{1,20}$/;
 // QQ 音乐歌曲（source 为 qq）：id 为歌曲 mid，albumId 为专辑 mid，链接为本站前缀加 QQ 音乐官网地址
 const QQ_ID = /^[0-9A-Za-z]{1,32}$/;
+const NCM_PATH = /^\/ncm-(?:song|album|artist|playlist)\/[1-9][0-9]{0,18}\/?$/;
 const QQ_PATH = /^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/(?:songDetail|albumDetail|singer|playlist|mv\/v)\/[0-9A-Za-z]{1,32}$/;
 
 function canonicalQQHref(value) {
@@ -63,7 +66,7 @@ function canonicalQQHref(value) {
 }
 
 const str = (value, max = 300) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
-const href = (value) => { const s = canonicalQQHref(str(value, 600)); return SITE_PATH.test(s) || QQ_PATH.test(s) ? s : ''; };
+const href = (value) => { const s = canonicalQQHref(str(value, 600)); return SITE_PATH.test(s) || QQ_PATH.test(s) || NCM_PATH.test(s) ? s : ''; };
 const art = (value) => { const s = str(value, 600); return ART.test(s) ? s : ''; };
 const color = (value) => (typeof value === 'string' && COLOR.test(value) ? value.toLowerCase() : '');
 const country = (value) => (typeof value === 'string' && /^[a-z]{2}$/i.test(value) ? value.toLowerCase() : 'us');
@@ -74,12 +77,13 @@ function cleanTrack(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const kind = raw.kind === 'music-video' ? 'music-video' : raw.kind === 'song' ? 'song' : '';
   const qq = raw.source === 'qq';
+  const ncm = raw.source === 'ncm';
   const ID = qq ? QQ_ID : NUMERIC_ID;
   const id = str(raw.id, qq ? 32 : 20);
-  if (!kind || !ID.test(id) || (qq && kind !== 'song')) return null;
+  if (!kind || !ID.test(id) || ((qq || ncm) && kind !== 'song') || (ncm && (!/^[1-9][0-9]{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n))) return null;
   const albumId = str(raw.albumId, qq ? 32 : 20);
   return {
-    ...(qq ? { source: 'qq', vip: raw.vip === true || raw.qq?.vip === true } : {}),
+    ...(qq ? { source: 'qq', vip: raw.vip === true || raw.qq?.vip === true } : ncm ? { source: 'ncm', vip: raw.vip === true || raw.ncm?.vip === true } : {}),
     kind,
     id,
     country: country(raw.country),
@@ -178,8 +182,8 @@ function randomId(length) {
 }
 
 /** 资料库键：Apple Music 为 `${kind}:${id}`（与旧数据相同），QQ 音乐为 `qq:${kind}:${id}` */
-export const keyOf = (kind, id, source) => (source === 'qq' ? `qq:${kind}:${id}` : `${kind}:${id}`);
-const sameSource = (item, source) => (item.source === 'qq') === (source === 'qq');
+export const keyOf = (kind, id, source) => (['qq', 'ncm'].includes(source) ? `${source}:${kind}:${id}` : `${kind}:${id}`);
+const sameSource = (item, source) => sourceOf(item) === sourceOf({ source });
 
 /* ---------- IndexedDB ---------- */
 const request = (req) => new Promise((resolve, reject) => {
@@ -731,6 +735,7 @@ export function artUrl(template, w, h = w) {
 
 /** 曲目快照 → 播放队列条目（见 AmPlayer.playQueue） */
 export function entryOf(track) {
+  if (track.source === 'ncm') return ncmEntry(ncmSnapshot(track));
   if (track.source === 'qq') {
     const albumMid = track.albumId || '';
     return {

@@ -380,3 +380,6 @@ details.set-var-group[open] > summary { margin-bottom: 6px; }
   .set-font-actions { width: 100%; justify-content: flex-start; padding: 0 10px 10px 36px; }
   .set-font-actions:empty { display: none; }
 }
+
+.set-ncm-actions { justify-content: flex-end; gap: 10px; }
+#ncm .set-input { width: 100%; max-width: 520px; }

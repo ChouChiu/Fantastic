@@ -220,9 +220,15 @@ fn lyric_new_maps_word_timestamps_translation_and_romanization() {
         })
     );
     let lyrics = lyrics_dto(&raw);
-    assert_eq!(lyrics.raw.yroma.as_deref(), Some("[0,120](0,60)Hoi(60,60)\n"));
+    assert_eq!(
+        lyrics.raw.yroma.as_deref(),
+        Some("[0,120](0,60)Hoi(60,60)\n")
+    );
     assert_eq!(raw_lyrics_kind(Some("yroma")).unwrap(), "yroma");
-    assert_eq!(raw_lyrics_kind(Some("qrc")).err().unwrap().0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        raw_lyrics_kind(Some("qrc")).err().unwrap().0,
+        StatusCode::BAD_REQUEST
+    );
 }
 #[test]
 fn album_artist_and_playlist_samples_map_to_qq_contract() {
@@ -239,7 +245,10 @@ fn album_artist_and_playlist_samples_map_to_qq_contract() {
     .unwrap();
     let album = value(album);
     assert_eq!(album["album"]["mid"], "42");
-    assert_eq!(album["album"]["artists"][0], json!({"name":"歌手","mid":"7"}));
+    assert_eq!(
+        album["album"]["artists"][0],
+        json!({"name":"歌手","mid":"7"})
+    );
     assert_eq!(album["songs"][0]["id"], "347230");
 
     let artist_raw = json!({
@@ -252,8 +261,13 @@ fn album_artist_and_playlist_samples_map_to_qq_contract() {
     assert_eq!(artist["mid"], "7");
     assert_eq!(artist["description"], "long");
     assert_eq!(artist["transNames"], json!(["Singer"]));
-    let songs = value(song_page_dto(&json!({"code":200,"data":{"songs":[song()],"total":"1","more":false}})));
-    assert_eq!(songs, json!({"songs":[value(song_dto(&song()).unwrap())],"total":1,"more":false}));
+    let songs = value(song_page_dto(
+        &json!({"code":200,"data":{"songs":[song()],"total":"1","more":false}}),
+    ));
+    assert_eq!(
+        songs,
+        json!({"songs":[value(song_dto(&song()).unwrap())],"total":1,"more":false})
+    );
 
     let playlist = value(playlist_info(
         &json!({"code":200,"playlist":{"id":99,"name":"歌单","coverImgUrl":"http://p2.music.126.net/p.jpg",
@@ -271,9 +285,15 @@ fn suggestion_sample_maps_all_three_collections() {
         "artists":[{"id":2,"name":"人","picUrl":"http://p1.music.126.net/a.jpg","albumSize":3,"mvSize":4}],
         "albums":[{"id":3,"name":"碟","artist":{"name":"人"},"picUrl":"http://p1.music.126.net/b.jpg"}]
     }})).unwrap());
-    assert_eq!(dto["songs"][0], json!({"mid":"1","name":"歌","artist":"人"}));
+    assert_eq!(
+        dto["songs"][0],
+        json!({"mid":"1","name":"歌","artist":"人"})
+    );
     assert_eq!(dto["artists"][0]["mid"], "2");
-    assert_eq!(dto["albums"][0], json!({"mid":"3","name":"碟","artist":"人","cover":"https://p1.music.126.net/b.jpg"}));
+    assert_eq!(
+        dto["albums"][0],
+        json!({"mid":"3","name":"碟","artist":"人","cover":"https://p1.music.126.net/b.jpg"})
+    );
 }
 #[test]
 fn detail_is_flattened_meta_is_absent_and_ids_must_match() {
@@ -293,7 +313,7 @@ fn play_reports_actual_tier_codec_expiry_and_only_public_fields() {
     let dto = value(audio_dto(&play_data(), "347230").unwrap().unwrap());
     assert_eq!(
         dto,
-        json!({"url":"http://m701.music.126.net/audio.mp3?auth=test","quality":"exhigh",
+        json!({"url":"https://m701.music.126.net/audio.mp3?auth=test","quality":"exhigh",
         "bitrate":320000,"format":"MP3","codec":"mp3","contentType":"audio/mpeg","sizeBytes":13040000,"expiresIn":1200})
     );
     let mut raw = play_data();
@@ -606,7 +626,7 @@ async fn capabilities_are_always_enabled_including_local_wrapper_mode() {
 async fn invalid_requests_and_out_of_scope_routes_make_no_upstream_requests() {
     let state = Arc::new(AppState::new("http://localhost:12340".into()));
     for id in ["0", "01", "-1", "abc", "9223372036854775808", "1%21"] {
-        for suffix in ["", "/play", "/qualities"] {
+        for suffix in ["", "/play", "/qualities", "/download"] {
             assert_eq!(
                 get(state.clone(), &format!("/ncm/song/{id}{suffix}"))
                     .await
@@ -619,6 +639,7 @@ async fn invalid_requests_and_out_of_scope_routes_make_no_upstream_requests() {
         "/ncm/search?q=%20",
         "/ncm/search?q=x&kind=mv",
         "/ncm/song/1/play?quality=sky",
+        "/ncm/song/1/download?quality=sky",
     ] {
         assert_eq!(
             get(state.clone(), path).await.status(),
@@ -628,7 +649,7 @@ async fn invalid_requests_and_out_of_scope_routes_make_no_upstream_requests() {
     for path in ["/ncm/cookie"] {
         assert_eq!(
             get(state.clone(), path).await.status(),
-            StatusCode::NOT_FOUND
+            StatusCode::METHOD_NOT_ALLOWED
         );
     }
 }
@@ -643,18 +664,29 @@ async fn cached_ncm_raw_lyrics_matches_qq_download_contract() {
     );
     let response = get(state.clone(), "/ncm/song/347230/lyrics/raw?kind=lrc").await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()[header::CONTENT_TYPE], "text/plain; charset=utf-8");
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/plain; charset=utf-8"
+    );
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     assert!(response.headers()[header::CONTENT_DISPOSITION]
         .to_str()
         .unwrap()
         .contains("filename*=UTF-8''"));
     assert_eq!(
-        String::from_utf8(to_bytes(response.into_body(), 100000).await.unwrap().to_vec()).unwrap(),
+        String::from_utf8(
+            to_bytes(response.into_body(), 100000)
+                .await
+                .unwrap()
+                .to_vec()
+        )
+        .unwrap(),
         "[00:00.00]海阔天空\n"
     );
     assert_eq!(
-        get(state, "/ncm/song/347230/lyrics/raw?kind=qrc").await.status(),
+        get(state, "/ncm/song/347230/lyrics/raw?kind=qrc")
+            .await
+            .status(),
         StatusCode::BAD_REQUEST
     );
 }
@@ -691,4 +723,260 @@ async fn cached_detail_search_and_errors_use_public_contract() {
     }
     assert!(check_response(json!({"code":403,"cookie":"private"})).is_err());
     assert!(check_response(json!({"code":200})).is_ok());
+}
+
+async fn cookie_request(state: Arc<AppState>, method: &str, raw: &str) -> Response {
+    crate::router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/ncm/cookie")
+                .method(method)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(raw.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn cookie_endpoints_persist_hot_replace_report_only_boolean_and_clear() {
+    let dir = std::env::temp_dir().join(format!("fantastic-ncm-cookie-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("cookie");
+    let mut state = AppState::new("http://localhost:12340".into());
+    state.ncm = Ncm::new(Some(&path)).unwrap();
+    let state = Arc::new(state);
+    assert_eq!(
+        body(get(state.clone(), "/ncm/cookie/status").await).await,
+        json!({"configured":false})
+    );
+    for cookie in [
+        "MUSIC_U=private-session; __csrf=secret-csrf",
+        "MUSIC_U=replaced-session",
+    ] {
+        let response =
+            cookie_request(state.clone(), "PUT", &json!({"cookie":cookie}).to_string()).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+        assert!(to_bytes(response.into_body(), 1000)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), cookie);
+        let status = get(state.clone(), "/ncm/cookie/status").await;
+        assert_eq!(status.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(body(status).await, json!({"configured":true}));
+        let request = state
+            .ncm
+            .request_builder(DETAIL_PATH, detail_params("347230"), Crypto::Weapi)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(request.headers()[header::COOKIE]
+            .to_str()
+            .unwrap()
+            .contains(cookie.split(';').next().unwrap()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+    let values = state.ncm.cookies.values(&MUSIC.parse().unwrap());
+    assert!(
+        !values.contains_key("__csrf"),
+        "replacing cookies must drop old login state"
+    );
+    assert!(
+        configured(&Ncm::new(Some(&path)).unwrap()),
+        "saved login survives restart"
+    );
+    for cookie in ["other=value", "MUSIC_U=", ""] {
+        assert_eq!(
+            cookie_request(state.clone(), "PUT", &json!({"cookie":cookie}).to_string())
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            body(get(state.clone(), "/ncm/cookie/status").await).await,
+            json!({"configured":false})
+        );
+    }
+    cookie_request(
+        state.clone(),
+        "PUT",
+        r#"{"cookie":"MUSIC_U=clear-me; __csrf=clear-csrf"}"#,
+    )
+    .await;
+    let response = cookie_request(state.clone(), "DELETE", "").await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(to_bytes(response.into_body(), 1000)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    assert_eq!(
+        body(get(state.clone(), "/ncm/cookie/status").await).await,
+        json!({"configured":false})
+    );
+    assert!(!configured(&Ncm::new(Some(&path)).unwrap()));
+    assert!(!state
+        .ncm
+        .cookies
+        .values(&MUSIC.parse().unwrap())
+        .contains_key("__csrf"));
+    let host = to_bytes(get(state, "/assets/host.js").await.into_body(), 100000)
+        .await
+        .unwrap();
+    let host = String::from_utf8(host.to_vec()).unwrap();
+    for secret in [
+        "private-session",
+        "replaced-session",
+        "secret-csrf",
+        "clear-me",
+        "MUSIC_U",
+    ] {
+        assert!(!host.contains(secret));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn cookie_errors_are_explicit_redacted_and_do_not_mutate_memory() {
+    let state = Arc::new(AppState::new("http://localhost:12340".into()));
+    for method in ["PUT", "DELETE"] {
+        let response = cookie_request(
+            state.clone(),
+            method,
+            r#"{"cookie":"MUSIC_U=private-session"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            body(response).await,
+            json!({"error":"NCM cookie file is not configured"})
+        );
+    }
+    let response = cookie_request(state.clone(), "PUT", r#"{"cookie":["private-session"]}"#).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body(response).await, json!({"error":"Invalid NCM request"}));
+    assert!(!configured(&state.ncm));
+    let mut state = AppState::new("http://localhost:12340".into());
+    state.ncm.cookie_file = Some(FilePath::new("/nonexistent-ncm-cookie-dir/cookie").to_owned());
+    let state = Arc::new(state);
+    let response = cookie_request(
+        state.clone(),
+        "PUT",
+        r#"{"cookie":"MUSIC_U=private-session"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        body(response).await,
+        json!({"error":"Cannot update NCM cookie file"})
+    );
+    assert!(!configured(&state.ncm));
+    let response = cookie_request(state, "PUT", r#"{"cookie":"private-session\r\n"}"#).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body(response).await, json!({"error":"Invalid NCM request"}));
+}
+
+#[tokio::test]
+async fn download_redirect_matches_qq_attachment_contract_without_fetching_media() {
+    let mut song = song_dto(&song()).unwrap();
+    song.name = "../海阔天空\r\n\"".into();
+    let audio = audio_dto(&play_data(), "347230").unwrap();
+    let response = download_response(&song, audio).unwrap();
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response.headers()[header::LOCATION],
+        "https://m701.music.126.net/audio.mp3?auth=test"
+    );
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "audio/mpeg");
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(
+        response.headers()[header::CONTENT_DISPOSITION],
+        attachment(&safe_basename(&song), "mp3")
+    );
+    assert!(!response.headers()[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .contains("../"));
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
+    assert!(to_bytes(response.into_body(), 1000)
+        .await
+        .unwrap()
+        .is_empty());
+    let response = download_response(&song, None).unwrap_err().into_response();
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        body(response).await,
+        json!({"error":"NCM source temporarily unavailable"})
+    );
+}
+
+#[tokio::test]
+async fn ncm_pages_and_assets_load_on_direct_navigation() {
+    let state = Arc::new(AppState::new("http://localhost:12340".into()));
+    for kind in ["song", "album", "artist", "playlist"] {
+        assert_eq!(
+            get(state.clone(), &format!("/ncm-{kind}/347230"))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        for ext in ["mjs", "html"] {
+            assert_eq!(
+                get(state.clone(), &format!("/assets/views/ncm-{kind}.{ext}"))
+                    .await
+                    .status(),
+                StatusCode::OK
+            );
+        }
+    }
+    for path in ["/assets/sources/ncm.mjs", "/assets/views/settings-ncm.mjs"] {
+        assert_eq!(get(state.clone(), path).await.status(), StatusCode::OK);
+    }
+    for path in [
+        "/ncm-song/0",
+        "/ncm-song/01",
+        "/ncm-mv/123",
+        "/ncm-album/9223372036854775808",
+    ] {
+        assert_eq!(
+            get(state.clone(), path).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+}
+
+#[test]
+fn old_inflight_set_cookie_cannot_restore_cleared_login() {
+    use reqwest::ResponseBuilderExt;
+    let jar = anonymous_cookies();
+    jar.insert("MUSIC_U", "old-session");
+    let generation = jar.generation();
+    jar.replace(anonymous_cookies());
+    let response = axum::http::Response::builder()
+        .url(MUSIC.parse().unwrap())
+        .header(
+            header::SET_COOKIE,
+            "MUSIC_U=old-refreshed; Domain=.music.163.com; Path=/",
+        )
+        .body("")
+        .unwrap()
+        .into();
+    jar.store_for_generation(&response, generation);
+    assert!(!jar.values(&MUSIC.parse().unwrap()).contains_key("MUSIC_U"));
+    jar.store_for_generation(&response, jar.generation());
+    assert_eq!(
+        jar.values(&MUSIC.parse().unwrap())["MUSIC_U"],
+        "old-refreshed"
+    );
 }

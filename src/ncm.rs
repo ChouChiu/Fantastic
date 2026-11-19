@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, put},
     Json, Router,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -19,8 +19,11 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
-    path::Path as FilePath,
-    sync::{Arc, LazyLock, Mutex},
+    path::{Path as FilePath, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, LazyLock, Mutex,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -34,6 +37,8 @@ impl IntoResponse for NcmError {
             Json(json!({"error": match self.0 {
                 StatusCode::BAD_REQUEST => "Invalid NCM request",
                 StatusCode::NOT_FOUND => "NCM resource not found",
+                StatusCode::SERVICE_UNAVAILABLE => "NCM cookie file is not configured",
+                StatusCode::INTERNAL_SERVER_ERROR => "Cannot update NCM cookie file",
                 _ => "NCM source temporarily unavailable",
             }})),
         )
@@ -134,7 +139,7 @@ struct Cookie {
 /// A private jar for the two fixed HTTPS API origins. It ingests Set-Cookie,
 /// observes domain/path/expiry, and never serializes or implements Debug.
 #[derive(Default)]
-struct CookieJar(Mutex<BTreeMap<(String, String, String), Cookie>>);
+struct CookieJar(Mutex<BTreeMap<(String, String, String), Cookie>>, AtomicU64);
 impl CookieJar {
     fn insert(&self, name: &str, value: &str) {
         self.0.lock().unwrap().insert(
@@ -167,7 +172,19 @@ impl CookieJar {
             .map(|((name, _, _), cookie)| (name.clone(), cookie.value.clone()))
             .collect()
     }
+    fn generation(&self) -> u64 {
+        self.1.load(Ordering::Acquire)
+    }
+    fn replace(&self, jar: CookieJar) {
+        let mut values = self.0.lock().unwrap();
+        self.1.fetch_add(1, Ordering::AcqRel);
+        *values = std::mem::take(&mut *jar.0.lock().unwrap());
+    }
+    #[cfg(test)]
     fn store(&self, response: &reqwest::Response) {
+        self.store_for_generation(response, self.generation());
+    }
+    fn store_for_generation(&self, response: &reqwest::Response, generation: u64) {
         let host = response.url().host_str().unwrap_or_default();
         if !matches!(host, "music.163.com" | "interface.music.163.com") {
             return;
@@ -218,7 +235,11 @@ impl CookieJar {
                 };
             }
             if valid {
-                self.0.lock().unwrap().insert(
+                let mut values = self.0.lock().unwrap();
+                if generation != self.generation() {
+                    return;
+                }
+                values.insert(
                     (name.into(), cookie.domain.clone(), cookie.path.clone()),
                     cookie,
                 );
@@ -244,6 +265,56 @@ fn cookie_header(values: &BTreeMap<String, String>) -> ApiResult<header::HeaderV
     let mut value = header::HeaderValue::from_str(&value).map_err(|_| unavailable())?;
     value.set_sensitive(true);
     Ok(value)
+}
+
+// Fresh anonymous protocol/device cookies; replacing a login never retains old account cookies.
+fn anonymous_cookies() -> CookieJar {
+    let cookies = CookieJar::default();
+    for (name, value) in [
+        ("os", "pc"),
+        ("appver", "3.1.17.204416"),
+        (
+            "osver",
+            "Microsoft-Windows-10-Professional-build-19045-64bit",
+        ),
+        ("channel", "netease"),
+        ("__remember_me", "true"),
+        ("ntes_kaola_ad", "1"),
+        ("WEVNSM", "1.0.0"),
+    ] {
+        cookies.insert(name, value);
+    }
+    let random = hex::encode(rand::thread_rng().gen::<[u8; 16]>());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    cookies.insert("_ntes_nuid", &random);
+    cookies.insert("_ntes_nnid", &format!("{random},{now}"));
+    cookies.insert(
+        "deviceId",
+        &hex::encode_upper(rand::thread_rng().gen::<[u8; 26]>()),
+    );
+    cookies.insert("NMTID", &random[..16]);
+    let prefix: String = (0..6)
+        .map(|_| char::from(b'a' + rand::thread_rng().gen_range(0..26)))
+        .collect();
+    cookies.insert("WNMCID", &format!("{prefix}.{now}.01.0"));
+    cookies
+}
+fn parse_cookies(raw: &str) -> ApiResult<Vec<(String, String)>> {
+    raw.trim()
+        .split(';')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|pair| {
+            let (name, value) = pair
+                .split_once('=')
+                .filter(|(n, v)| valid_cookie_pair(n, v))
+                .ok_or_else(bad)?;
+            Ok((name.to_owned(), value.to_owned()))
+        })
+        .collect()
 }
 
 struct Cache<T>(Mutex<LruCache<String, (Instant, T)>>);
@@ -273,6 +344,8 @@ impl<T: Clone> Cache<T> {
 pub struct Ncm {
     api: reqwest::Client,
     cookies: CookieJar,
+    cookie_file: Option<PathBuf>,
+    cookie_updates: tokio::sync::Mutex<()>,
     permits: tokio::sync::Semaphore,
     rate: crate::wrapper::RateLimit,
     searches: Cache<SearchResult>,
@@ -287,51 +360,14 @@ enum Crypto {
 }
 impl Ncm {
     pub fn new(cookie_file: Option<&FilePath>) -> Result<Self, String> {
-        let cookies = CookieJar::default();
-        for (name, value) in [
-            ("os", "pc"),
-            ("appver", "3.1.17.204416"),
-            (
-                "osver",
-                "Microsoft-Windows-10-Professional-build-19045-64bit",
-            ),
-            ("channel", "netease"),
-            ("__remember_me", "true"),
-            ("ntes_kaola_ad", "1"),
-            ("WEVNSM", "1.0.0"),
-        ] {
-            cookies.insert(name, value);
-        }
-        let random = hex::encode(rand::thread_rng().gen::<[u8; 16]>());
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        cookies.insert("_ntes_nuid", &random);
-        cookies.insert("_ntes_nnid", &format!("{random},{now}"));
-        cookies.insert(
-            "deviceId",
-            &hex::encode_upper(rand::thread_rng().gen::<[u8; 26]>()),
-        );
-        cookies.insert("NMTID", &random[..16]);
-        let prefix: String = (0..6)
-            .map(|_| char::from(b'a' + rand::thread_rng().gen_range(0..26)))
-            .collect();
-        cookies.insert("WNMCID", &format!("{prefix}.{now}.01.0"));
+        let cookies = anonymous_cookies();
         if let Some(path) = cookie_file {
             match std::fs::read_to_string(path) {
                 Ok(raw) => {
-                    for pair in raw
-                        .trim()
-                        .split(';')
-                        .map(str::trim)
-                        .filter(|p| !p.is_empty())
+                    for (name, value) in
+                        parse_cookies(&raw).map_err(|_| "Invalid NCM cookie file")?
                     {
-                        let (name, value) = pair
-                            .split_once('=')
-                            .filter(|(n, v)| valid_cookie_pair(n, v))
-                            .ok_or("Invalid NCM cookie file")?;
-                        cookies.insert(name, value);
+                        cookies.insert(&name, &value);
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -349,6 +385,8 @@ impl Ncm {
         Ok(Self {
             api,
             cookies,
+            cookie_file: cookie_file.map(FilePath::to_path_buf),
+            cookie_updates: tokio::sync::Mutex::new(()),
             permits: tokio::sync::Semaphore::new(8),
             rate: crate::wrapper::RateLimit::new(10),
             searches: Cache::new(128),
@@ -368,9 +406,7 @@ impl Ncm {
                 path == SEARCH_PATH
                     || path == DETAIL_PATH
                     || path == LYRIC_PATH
-                    || path
-                        .strip_prefix("/api/v1/album/")
-                        .is_some_and(valid_id)
+                    || path.strip_prefix("/api/v1/album/").is_some_and(valid_id)
                     || path
                         .strip_prefix("/api/artist/albums/")
                         .is_some_and(valid_id)
@@ -454,13 +490,14 @@ impl Ncm {
             let retry = {
                 let _permit = self.permits.acquire().await.map_err(|_| unavailable())?;
                 self.rate.acquire().await;
+                let generation = self.cookies.generation();
                 match self
                     .request_builder(path, data.clone(), crypto)?
                     .send()
                     .await
                 {
                     Ok(response) => {
-                        self.cookies.store(&response);
+                        self.cookies.store_for_generation(&response, generation);
                         let status = response.status();
                         if status.is_success() {
                             match response.json::<Value>().await {
@@ -576,7 +613,8 @@ fn count(value: &Value) -> u64 {
         .unwrap_or_default()
 }
 fn flag(value: &Value) -> bool {
-    value.as_bool()
+    value
+        .as_bool()
         .or_else(|| value.as_u64().map(|value| value != 0))
         .or_else(|| value.as_str().map(|value| matches!(value, "1" | "true")))
         .unwrap_or(false)
@@ -969,7 +1007,11 @@ fn album_dto(raw: &Value, id: &str) -> ApiResult<AlbumPage> {
     let artists = album_raw
         .get("artists")
         .map(artists)
-        .or_else(|| album_raw.get("artist").map(|artist| artists(&json!([artist]))))
+        .or_else(|| {
+            album_raw
+                .get("artist")
+                .map(|artist| artists(&json!([artist])))
+        })
         .unwrap_or_default();
     Ok(AlbumPage {
         album: Album {
@@ -1104,8 +1146,7 @@ fn album_list_dto(raw: &Value) -> (Vec<AlbumSummary>, bool) {
             rows.iter()
                 .filter_map(|album| {
                     Some(AlbumSummary {
-                        mid: id_of(&album["id"])
-                            .or_else(|| id_of(&album["albumId"]))?,
+                        mid: id_of(&album["id"]).or_else(|| id_of(&album["albumId"]))?,
                         name: text(&album["name"]),
                         cover: cover(&album["picUrl"]),
                         publish_time: count(&album["publishTime"]),
@@ -1132,7 +1173,11 @@ fn playlist_info(raw: &Value, id: &str) -> Option<PlaylistInfo> {
     let item = raw
         .get("playlist")
         .filter(|value| value.is_object())
-        .or_else(|| payload(raw).get("playlist").filter(|value| value.is_object()))?;
+        .or_else(|| {
+            payload(raw)
+                .get("playlist")
+                .filter(|value| value.is_object())
+        })?;
     Some(PlaylistInfo {
         id: id_of(&item["id"]).unwrap_or_else(|| id.to_owned()),
         name: text(&item["name"]),
@@ -1172,15 +1217,21 @@ fn lyrics_dto(raw: &Value) -> Lyrics {
     let candidates = raw
         .yrc
         .as_ref()
-        .map(|text| Lyric { source: "yrc", text: text.clone() })
+        .map(|text| Lyric {
+            source: "yrc",
+            text: text.clone(),
+        })
         .into_iter()
-        .chain(raw.lrc.as_ref().map(|text| Lyric { source: "lrc", text: text.clone() }))
+        .chain(raw.lrc.as_ref().map(|text| Lyric {
+            source: "lrc",
+            text: text.clone(),
+        }))
         .collect();
     Lyrics {
         candidates,
         raw_yrc: raw.yrc.is_some(),
         raw_trans: raw.trans.is_some(),
-        raw_roma: raw.roma.is_some(),
+        raw_roma: raw.roma.is_some() || raw.yroma.is_some(),
         raw,
     }
 }
@@ -1197,8 +1248,7 @@ fn suggest_dto(raw: &Value) -> ApiResult<Suggestions> {
         .map(|rows| {
             rows.iter()
                 .filter_map(|song| {
-                    let mid = id_of(&song["id"])
-                        .or_else(|| id_of(&song["mid"]))?;
+                    let mid = id_of(&song["id"]).or_else(|| id_of(&song["mid"]))?;
                     let name = {
                         let relname = text(&song["relname"]);
                         if relname.is_empty() {
@@ -1227,8 +1277,7 @@ fn suggest_dto(raw: &Value) -> ApiResult<Suggestions> {
         .map(|rows| {
             rows.iter()
                 .filter_map(|artist| {
-                    let mid = id_of(&artist["id"])
-                        .or_else(|| id_of(&artist["mid"]))?;
+                    let mid = id_of(&artist["id"]).or_else(|| id_of(&artist["mid"]))?;
                     let avatar = cover(
                         artist
                             .get("picUrl")
@@ -1252,8 +1301,7 @@ fn suggest_dto(raw: &Value) -> ApiResult<Suggestions> {
         .map(|rows| {
             rows.iter()
                 .filter_map(|album| {
-                    let mid = id_of(&album["id"])
-                        .or_else(|| id_of(&album["albumId"]))?;
+                    let mid = id_of(&album["id"]).or_else(|| id_of(&album["albumId"]))?;
                     let artist = album
                         .get("artist")
                         .and_then(|artist| artist.get("name"))
@@ -1269,7 +1317,11 @@ fn suggest_dto(raw: &Value) -> ApiResult<Suggestions> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Suggestions { songs, artists, albums })
+    Ok(Suggestions {
+        songs,
+        artists,
+        albums,
+    })
 }
 
 fn raw_lyrics_kind(kind: Option<&str>) -> ApiResult<&'static str> {
@@ -1301,14 +1353,15 @@ fn safe_basename(song: &Song) -> String {
         .filter(|c| !c.is_control() && !"/\\:*?\"<>|".contains(*c))
         .take(160)
         .collect();
-    base = base.trim_matches(|c: char| c.is_whitespace() || c == '.').to_owned();
+    base = base
+        .trim_matches(|c: char| c.is_whitespace() || c == '.')
+        .to_owned();
     if base.is_empty() {
         base = song.id.clone();
     }
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
-        "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
-        "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if RESERVED.contains(&base.to_ascii_uppercase().as_str()) {
         base.push('_');
@@ -1523,10 +1576,11 @@ fn audio_dto(raw: &Value, id: &str) -> ApiResult<Option<Audio>> {
     {
         return Ok(None);
     }
-    let url = row["url"]
+    let mut url = row["url"]
         .as_str()
         .and_then(cdn_url)
         .ok_or_else(unavailable)?;
+    let _ = url.set_scheme("https");
     let quality: Quality =
         serde_json::from_value(row["level"].clone()).map_err(|_| unavailable())?;
     let codec = text(&row["type"]).to_ascii_lowercase();
@@ -1635,6 +1689,8 @@ fn adapter(state: &AppState) -> &Ncm {
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/ncm/capabilities", get(capabilities))
+        .route("/ncm/cookie", put(set_cookie).delete(clear_cookie))
+        .route("/ncm/cookie/status", get(cookie_status))
         .route("/ncm/search", get(search))
         .route("/ncm/suggest", get(suggest))
         .route("/ncm/album/:id", get(album))
@@ -1645,8 +1701,102 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/ncm/song/:id", get(info))
         .route("/ncm/song/:id/qualities", get(qualities))
         .route("/ncm/song/:id/play", get(play))
+        .route("/ncm/song/:id/download", get(download))
         .route("/ncm/song/:id/lyrics", get(lyrics))
         .route("/ncm/song/:id/lyrics/raw", get(raw_lyrics))
+}
+#[derive(Deserialize)]
+struct CookieInput {
+    cookie: String,
+}
+fn configured(ncm: &Ncm) -> bool {
+    ncm.cookies
+        .values(&MUSIC.parse().unwrap())
+        .get("MUSIC_U")
+        .is_some_and(|v| !v.is_empty())
+}
+async fn cookie_status(State(state): State<Arc<AppState>>) -> Response {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"configured": configured(adapter(&state))})),
+    )
+        .into_response()
+}
+async fn update_cookie(ncm: &Ncm, raw: &str) -> ApiResult<Response> {
+    let path = ncm
+        .cookie_file
+        .as_ref()
+        .ok_or(NcmError(StatusCode::SERVICE_UNAVAILABLE))?;
+    let pairs = parse_cookies(raw)?;
+    let _update = ncm.cookie_updates.lock().await;
+    let jar = anonymous_cookies();
+    for (name, value) in pairs {
+        jar.insert(&name, &value);
+    }
+    let io_error = |_| NcmError(StatusCode::INTERNAL_SERVER_ERROR);
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path).await.map_err(io_error)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .await
+            .map_err(io_error)?;
+    }
+    file.set_len(0).await.map_err(io_error)?;
+    use tokio::io::AsyncWriteExt;
+    file.write_all(raw.trim().as_bytes())
+        .await
+        .map_err(io_error)?;
+    file.flush().await.map_err(io_error)?;
+    ncm.cookies.replace(jar);
+    // Song privileges can change with the login. Never reuse an old entitlement.
+    ncm.details.0.lock().unwrap().clear();
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(header::CACHE_CONTROL, "no-store")],
+    )
+        .into_response())
+}
+async fn set_cookie(
+    State(state): State<Arc<AppState>>,
+    input: Result<Json<CookieInput>, axum::extract::rejection::JsonRejection>,
+) -> ApiResult<Response> {
+    let Json(input) = input.map_err(|_| bad())?;
+    update_cookie(adapter(&state), &input.cookie).await
+}
+async fn clear_cookie(State(state): State<Arc<AppState>>) -> ApiResult<Response> {
+    update_cookie(adapter(&state), "").await
+}
+async fn download(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(query): Query<QualityQuery>,
+) -> ApiResult<Response> {
+    check_id(&id)?;
+    let ncm = adapter(&state);
+    let song = detail_dto(&ncm.detail(&id).await?, &id)?.song;
+    let audio = ncm
+        .audio(&id, query.quality.unwrap_or(Quality::Standard))
+        .await?;
+    download_response(&song, audio)
+}
+fn download_response(song: &Song, audio: Option<Audio>) -> ApiResult<Response> {
+    let audio = audio.ok_or_else(unavailable)?;
+    Ok(Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, audio.url)
+        .header(header::CONTENT_TYPE, audio.content_type)
+        .header(
+            header::CONTENT_DISPOSITION,
+            attachment(&safe_basename(song), &audio.codec),
+        )
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(axum::body::Body::empty())
+        .unwrap())
 }
 async fn capabilities() -> Json<Value> {
     Json(json!({"enabled": true, "qualities": QUALITIES.map(QualityCapability::new)}))
@@ -1708,13 +1858,13 @@ async fn artist(
     check_id(&id)?;
     let ncm = adapter(&state);
     let detail = ncm.request(ARTIST_DETAIL_PATH, artist_detail_params(&id), Crypto::Eapi);
-    let songs = ncm.request(ARTIST_SONGS_PATH, artist_songs_params(&id, 50, 0), Crypto::Eapi);
-    let albums_path = artist_album_path(&id);
-    let albums = ncm.request(
-        &albums_path,
-        artist_album_params(30, 0),
-        Crypto::Weapi,
+    let songs = ncm.request(
+        ARTIST_SONGS_PATH,
+        artist_songs_params(&id, 50, 0),
+        Crypto::Eapi,
     );
+    let albums_path = artist_album_path(&id);
+    let albums = ncm.request(&albums_path, artist_album_params(30, 0), Crypto::Weapi);
     let (detail, songs, albums) = tokio::join!(detail, songs, albums);
     let artist = artist_detail_dto(&detail?, &id)?;
     let songs = songs.map(|raw| song_page_dto(&raw)).unwrap_or(SongPage {
@@ -1722,9 +1872,7 @@ async fn artist(
         total: 0,
         more: false,
     });
-    let (albums, more_albums) = albums
-        .map(|raw| album_list_dto(&raw))
-        .unwrap_or_default();
+    let (albums, more_albums) = albums.map(|raw| album_list_dto(&raw)).unwrap_or_default();
     Ok(Json(ArtistPage {
         artist,
         songs: songs.songs,
@@ -1835,7 +1983,9 @@ async fn playlist(
     }))
 }
 async fn fetch_lyrics(ncm: &Ncm, id: &str) -> ApiResult<(Lyrics, u64)> {
-    let raw = ncm.request(LYRIC_PATH, lyric_params(id), Crypto::Weapi).await?;
+    let raw = ncm
+        .request(LYRIC_PATH, lyric_params(id), Crypto::Weapi)
+        .await?;
     let lyrics = lyrics_dto(&raw);
     let ttl = if lyrics.candidates.is_empty() {
         3600

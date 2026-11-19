@@ -162,6 +162,10 @@
 
   const loadQq = () => typeof module !== 'undefined' && module.exports
     ? import('../sources/qq.mjs') : import('/assets/sources/qq.mjs');
+  const loadNcm = () => typeof module !== 'undefined' && module.exports
+    ? import('../sources/ncm.mjs') : import('/assets/sources/ncm.mjs');
+  const isNativeSource = (item) => ['qq', 'ncm'].includes(item?.source);
+  const ncmQualityLabel = (quality) => `NCM · ${t(`ncm.quality.${quality}.label`)}`;
   const loadQqJocInput = () => typeof module !== 'undefined' && module.exports
     ? import('../qq-joc-input.mjs') : import('/assets/qq-joc-input.mjs');
   const loadPlaybackQuality = () => typeof module !== 'undefined' && module.exports
@@ -274,6 +278,7 @@
   }
 
   function variantLabel(v) {
+    if (v.source === 'ncm') return ncmQualityLabel(v.quality);
     if (v.source === 'qq') {
       return qqQualityLabel(v.quality);
     }
@@ -348,6 +353,7 @@
    * 其双耳渲染版本为 Spatial Audio；AAC、HE-AAC 与全景声的立体声缩混为 AAC
    */
   function qualityBadge(v) {
+    if (v?.source === 'ncm') return ['hires', 'jymaster'].includes(v.quality) ? 'hires' : v.quality === 'lossless' ? 'lossless' : 'lossy';
     if (v?.source === 'qq') {
       if (v.playback === 'joc' || v.codec === 'ac-4') return 'atmos';
       if (v.codec === 'flac') return v.quality === 'RS' ? 'hires' : 'lossless';
@@ -487,11 +493,24 @@
     };
   }
 
-  const sourceOf = (item) => item && item.source === 'qq' ? 'qq' : 'apple';
+  const sourceOf = (item) => isNativeSource(item) ? item.source : 'apple';
   const trackKey = (item) => `${sourceOf(item)}:${String(item?.track ?? item?.id ?? '')}`;
   const withIdentity = (item) => ({ ...item, source: sourceOf(item), key: trackKey(item) });
 
   async function resolveEntry(entry) {
+    if (entry.source === 'ncm') {
+      const ncm = await loadNcm();
+      ncm.numericId(entry.track);
+      const { mappedPlaybackQuality } = await loadPlaybackQuality();
+      let row = entry;
+      if (entry.quality === undefined) {
+        const rows = await ncm.qualities(entry.track);
+        row = ncm.pickDefaultQuality(rows, mappedPlaybackQuality(playbackSettings()));
+        if (!row) throw Object.assign(new Error(t('album.noPlayable', { name: entry.name })), { noPlayable: true });
+      }
+      return { ...entry, ...ncm.variantItem(entry.track, ncm.qualityVariant(row.quality, row)),
+        source: 'ncm', key: trackKey(entry), href: ncm.songPath(entry.track), title: entry.name };
+    }
     if (entry.source === 'qq') {
       const { mappedPlaybackQuality } = await loadPlaybackQuality();
       const preference = mappedPlaybackQuality(playbackSettings());
@@ -2066,7 +2085,7 @@
 
     /** 是否由它处理 entry（设置开启、浏览器支持，且不是同一张专辑按顺序的下一首） */
     wants(entry) {
-      return !!entry && sourceOf(entry) !== 'qq' && sourceOf(this.player.current) !== 'qq'
+      return !!entry && sourceOf(entry) === 'apple' && sourceOf(this.player.current) === 'apple'
         && playbackSettings().transition !== 'off' && canControlVolume()
         && !!global.AmAutomix && !this.player.continuous(entry);
     }
@@ -2490,7 +2509,7 @@
       const badge = this.$('.player-mode');
       badge.disabled = false;
       const doc = this.root.ownerDocument;
-      const icon = c.source === 'qq' ? null : qualityIcon(c.badge, doc);
+      const icon = isNativeSource(c) ? null : qualityIcon(c.badge, doc);
       if (icon) icon.removeAttribute('title');
       const label = icon ? icon.getAttribute('aria-label') : this.modeText();
       // JOC 渲染时图标后面注明，否则看不出没有走浏览器自己的解码
@@ -2505,6 +2524,7 @@
     /** 播放方式：MSE · ALAC（浏览器直接解码）、ALAC → FLAC（转码）、E-AC-3 → 5.1 PCM（解码为多声道 PCM）、E-AC-3 → JOC（对象渲染） */
     modeText() {
       const c = this.current;
+      if (c.source === 'ncm') return ncmQualityLabel(c.quality);
       if (c.source === 'qq') {
         const quality = c.quality || 'HQ';
         return qqQualityLabel(quality);
@@ -2529,7 +2549,7 @@
       if (panel.hidden || !c) return;
       const doc = this.root.ownerDocument;
       const v = c.variant || {};
-      const qq = c.source === 'qq';
+      const qq = isNativeSource(c);
       const joc = isJocMode(c.mode);
       const rows = [
         [t('player.mode'), this.modeText()],
@@ -2551,7 +2571,7 @@
       if (state.loading) list.append(el(doc, 'p', 'quality-panel-status', t('player.qualitiesLoading')));
       else if (state.error) list.append(el(doc, 'p', 'quality-panel-status', t('player.qualitiesFailed', { msg: state.error })));
       for (const variant of sortVariants(state.variants || [])) {
-        const id = qq ? `qq:${c.track}:${variant.quality}` : `${c.track}:${variant.group_id}`;
+        const id = qq ? `${c.source}:${c.track}:${variant.quality}` : `${c.track}:${variant.group_id}`;
         const playable = (qq ? detectQqModes(variant, this.audio) : detectModes(variant.codecs)).length > 0;
         const spec = qq ? [variant.format || codecName(variant.codecs)]
           : [codecName(variant.codecs), formatRate(variant.bandwidth), ...variantTags(variant), !playable && t('row.downloadOnly')];
@@ -2578,14 +2598,14 @@
      * 否则向 wrapper-lite 取 master / QQ 取 qualities，按来源与歌曲缓存，取回后重绘详情
      */
     variantsOf(item) {
-      const qq = item.source === 'qq';
+      const qq = isNativeSource(item);
       if (item.variants && (!qq || item.variants.length)) return { variants: item.variants };
       const cached = this.variantCache.get(trackKey(item));
       if (cached) return cached;
       const state = { loading: true };
       this.variantCache.set(trackKey(item), state);
       if (this.variantCache.size > 20) this.variantCache.delete(this.variantCache.keys().next().value);
-      const request = qq ? loadQq().then(async (source) => ({ variants: source.qualityVariants(await source.qualities(item.track)) }))
+      const request = qq ? (item.source === 'ncm' ? loadNcm() : loadQq()).then(async (source) => ({ variants: source.qualityVariants(await source.qualities(item.track)) }))
         : global.AmWrapper.songMaster(item.track);
       request
         .then(({ variants }) => {
@@ -2712,10 +2732,11 @@
     /** 换成同一首歌的另一种音质 */
     async switchVariant(variant) {
       const c = this.current;
-      if (c?.source === 'qq') {
-        const qq = await loadQq();
-        if (this.current !== c || c.quality === variant.quality || variant.source !== 'qq'
+      if (isNativeSource(c)) {
+        const qq = await (c.source === 'ncm' ? loadNcm() : loadQq());
+        if (this.current !== c || c.quality === variant.quality || variant.source !== c.source
             || !detectQqModes(variant, this.audio).length) return;
+        if (c.source === 'ncm') qq.rememberQuality(variant.quality);
         const { mode, duration, ...item } = c;
         return this.play({ ...item, ...qq.variantItem(c.track, variant) });
       }
@@ -3082,7 +3103,7 @@
         const entry = this.queue.entries[indexOf(row)];
         if (e.target.closest('.queue-remove')) this.removeQueueEntry(indexOf(row));
         else if (e.target.closest('.queue-play')) this.playAt(indexOf(row));
-        else if (entry?.source === 'qq') {
+        else if (isNativeSource(entry)) {
           if (e.target.closest('a')) return;
           row.querySelector('.queue-name').click();
         }
@@ -3091,7 +3112,7 @@
       });
       list.addEventListener('dblclick', (e) => {
         const row = rowOf(e.target);
-        if (row && this.queue && this.queue.entries[indexOf(row)]?.source !== 'qq'
+        if (row && this.queue && !isNativeSource(this.queue.entries[indexOf(row)])
           && !e.target.closest('.queue-remove')) this.playAt(indexOf(row));
       });
       list.addEventListener('keydown', (e) => {
@@ -3102,7 +3123,7 @@
         const at = rows.indexOf(row);
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          if (this.queue.entries[index]?.source === 'qq' && e.key === 'Enter') row.querySelector('.queue-name').click();
+          if (isNativeSource(this.queue.entries[index]) && e.key === 'Enter') row.querySelector('.queue-name').click();
           else this.playAt(index);
           return;
         }
@@ -3302,11 +3323,11 @@
         const art = li.querySelector('.queue-art');
         if (entry.artwork) art.src = entry.artwork; else art.removeAttribute('src');
         const name = li.querySelector('.queue-name');
-        if (entry.source === 'qq') {
+        if (isNativeSource(entry)) {
           li.title = t('qq.openSong');
           const link = doc.createElement('a');
           link.className = 'queue-name';
-          link.href = `/https://y.qq.com/n/ryqq/songDetail/${entry.track}`;
+          link.href = entry.source === 'ncm' ? `/ncm-song/${entry.track}` : `/https://y.qq.com/n/ryqq/songDetail/${entry.track}`;
           name.replaceWith(link);
           const play = doc.createElement('button');
           play.type = 'button';
@@ -3506,7 +3527,7 @@
      * m3u8Url 为 CDN 原始地址（浏览器解密）
      */
     switchSource(source, restore = true) {
-      source = source === 'qq' ? 'qq' : 'apple';
+      source = ['qq', 'ncm'].includes(source) ? source : 'apple';
       const previous = this.source || 'apple';
       if (source === previous) return;
       this.sourceContexts ||= new Map();
@@ -3702,7 +3723,7 @@
       resolveEntry(entry)
         .then((item) => {
           if (serial !== this.nextSerial) return null;
-          if (item.source === 'qq') return false;
+          if (isNativeSource(item)) return false;
           const mode = detectMode(item.codecs);
           return this.mse.setNext({ ...item, mode });
         })
@@ -3770,7 +3791,7 @@
       this.jocMode = jocSettings().mode;
       this.jocStale = false;
       this.jocFallback = false;
-      const modes = requestedModes || (item.source === 'qq' ? detectQqModes(item, this.audio) : detectModes(item.codecs));
+      const modes = requestedModes || (isNativeSource(item) ? detectQqModes(item, this.audio) : detectModes(item.codecs));
       if (!modes.length) {
         this.showError(() => t('player.errorCodec', { codecs: item.codecs, hint: fallbackHint() }));
         return;
@@ -3788,7 +3809,7 @@
       const resumeAt = savedTime ?? (this.current && trackKey(this.current) === trackKey(item) ? this.transport().currentTime : 0);
       this.current = { ...item, mode: modes[0], duration: 0 };
       const entry = this.queue?.entries[this.queue.pos];
-      if (item.source === 'qq' && entry && trackKey(entry) === trackKey(item)) {
+      if (isNativeSource(item) && entry && trackKey(entry) === trackKey(item)) {
         // Repeat and source restoration keep the selected payload, including API format overrides.
         Object.assign(entry, { quality: item.quality, playback: item.playback, codec: item.codec,
           codecs: item.codecs, contentType: item.contentType, format: item.variant?.format });
@@ -3861,7 +3882,7 @@
       }
 
       this.teardown();
-      if (item.source !== 'qq') failedCodecs.add(item.codecs);
+      if (!isNativeSource(item)) failedCodecs.add(item.codecs);
       this.unsupportedListeners.forEach((fn) => fn(item.codecs));
       const detail = lastError && lastError.message ? ` (${lastError.message})` : '';
       this.showError(() => t('player.errorFailed', { label: item.label || item.codecs, codecs: item.codecs, hint: fallbackHint() }) + detail);
@@ -3935,8 +3956,22 @@
       }
       this.teardown();
       if (mode === 'native') {
+        let streamUrl = item.streamUrl;
+        if (item.source === 'ncm') {
+          const ncm = await loadNcm();
+          const audio = await ncm.resolvePlay(item.track, item.quality);
+          if (token !== this.playToken) return;
+          const variant = ncm.qualityVariant(audio.quality, audio);
+          Object.assign(item, ncm.variantItem(item.track, variant));
+          Object.assign(this.current, item);
+          const entry = this.queue?.entries[this.queue.pos];
+          if (entry && trackKey(entry) === trackKey(item)) Object.assign(entry, { quality: audio.quality, ...ncm.playbackInfo(audio.quality, audio) });
+          if (!detectQqModes(item, this.audio).length) throw new Error('Unsupported NCM audio format');
+          streamUrl = audio.url;
+          this.renderMode();
+        }
         onNativeReady?.();
-        this.audio.src = item.streamUrl;
+        this.audio.src = streamUrl;
         if (paused) {
           this.audio.addEventListener('loadedmetadata', () => {
             if (token === this.playToken && resumeAt > 0) this.audio.currentTime = resumeAt;

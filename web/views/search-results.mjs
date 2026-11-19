@@ -4,6 +4,7 @@ import { amp, artUrl } from '../amp.mjs';
 import { albumPathOf } from './actions.mjs';
 import { parseAppleLink } from './links.mjs';
 import * as qq from '../sources/qq.mjs';
+import * as ncm from '../sources/ncm.mjs';
 import { trackKey } from '../sources/track.mjs';
 
 const { AmI18n } = window;
@@ -132,17 +133,20 @@ export function createResults({ els, actions, storefront, catalogLang, ready, so
     els.tabs.hidden = true;
     els.body.replaceChildren(statusNode(t('search.loading'), 'loading'));
     try {
-      if (source() === 'qq') {
-        const results = await Promise.allSettled(QQ_GROUPS.map(([key, type]) =>
-          qq.search(term, type, { limit: QQ_LIMIT[key], signal: controller.signal })));
-        if (controller !== search.controller || source() !== 'qq') return;
+      if (['qq', 'ncm'].includes(source())) {
+        const requestedSource = source();
+        const adapter = requestedSource === 'ncm' ? ncm : qq;
+        const groups = requestedSource === 'ncm' ? QQ_GROUPS.filter(([, type]) => type !== 'mv') : QQ_GROUPS;
+        const results = await Promise.allSettled(groups.map(([key, type]) =>
+          adapter.search(term, type, { limit: QQ_LIMIT[key], signal: controller.signal })));
+        if (controller !== search.controller || source() !== requestedSource) return;
         // 各类型分别请求，部分失败时照样显示其余的；全部失败才报错
         if (results.every((result) => result.status === 'rejected')) throw results[0].reason;
-        search.groups = QQ_GROUPS.map(([key, type], index) => {
+        search.groups = groups.map(([key, type], index) => {
           const result = results[index];
           if (result.status !== 'fulfilled') return null;
           const { items, total } = result.value;
-          const group = { key, items: [], next: null, qq: { term, type, offset: items.length } };
+          const group = { key, items: [], next: null, qq: { source: requestedSource, term, type, offset: items.length } };
           group.items = qqItems(key, items, group);
           group.next = items.length && items.length < total ? 'qq' : null;
           return group;
@@ -269,7 +273,7 @@ export function createResults({ els, actions, storefront, catalogLang, ready, so
       try {
         if (group.qq) {
           const { term, type } = group.qq;
-          const page = await qq.search(term, type, { offset: group.qq.offset, limit: QQ_LIMIT[key], signal: controller.signal });
+          const page = await (group.qq.source === 'ncm' ? ncm : qq).search(term, type, { offset: group.qq.offset, limit: QQ_LIMIT[key], signal: controller.signal });
           if (controller !== search.controller) return;
           group.qq.offset += page.items.length;
           const seen = new Set(group.items.map((item) => item.href));
@@ -299,7 +303,8 @@ export function createResults({ els, actions, storefront, catalogLang, ready, so
 
   /** QQ 搜索结果 → 与 toItem 相同形状的条目；歌曲从这一首开始播放本组已载入的歌曲 */
   function qqItems(key, list, group) {
-    const base = { source: 'qq', mv: false, explicit: false, traits: [], has4K: false, subtitle: '', year: '', genre: '', album: '', artist: '' };
+    const adapter = group.qq.source === 'ncm' ? ncm : qq;
+    const base = { source: group.qq.source, mv: false, explicit: false, traits: [], has4K: false, subtitle: '', year: '', genre: '', album: '', artist: '' };
     return list.map((value) => {
       if (key === 'song') {
         const item = { ...base, kind: 'song', href: value.href, title: value.name, artist: value.artist, album: value.album,
@@ -307,15 +312,15 @@ export function createResults({ els, actions, storefront, catalogLang, ready, so
         item.onPlay = () => {
           const songs = group.items.filter((entry) => entry.track);
           if (player.current && trackKey(player.current) === value.key) { player.toggle(); return; }
-          player.playQueue(songs.map((entry) => qq.entryOf(entry.track)), Math.max(0, songs.indexOf(item)));
+          player.playQueue(songs.map((entry) => adapter.entryOf(entry.track)), Math.max(0, songs.indexOf(item)));
         };
         return item;
       }
-      if (key === 'artist') return { ...base, kind: 'artist', href: qq.artistPath(value.mid), title: value.name, artwork: value.avatar,
+      if (key === 'artist') return { ...base, kind: 'artist', href: adapter.artistPath(value.mid), title: value.name, artwork: value.avatar,
         genre: value.albumSize ? t('qq.artistAlbums', { n: value.albumSize }) : '' };
-      if (key === 'album') return { ...base, kind: 'album', href: qq.albumPath(value.mid), title: value.name, artwork: value.cover,
+      if (key === 'album') return { ...base, kind: 'album', href: adapter.albumPath(value.mid), title: value.name, artwork: value.cover,
         artist: names(value.artists), year: yearOf(value.publishTime) };
-      if (key === 'playlist') return { ...base, kind: 'playlist', href: qq.playlistPath(value.id), title: value.name, artwork: value.cover,
+      if (key === 'playlist') return { ...base, kind: 'playlist', href: adapter.playlistPath(value.id), title: value.name, artwork: value.cover,
         artist: value.creator || '' };
       return { ...base, kind: 'music-video', mv: true, href: qq.mvPath(value.vid), title: value.name, artwork: value.cover,
         artist: names(value.artists), duration: value.durationMs };
@@ -324,8 +329,8 @@ export function createResults({ els, actions, storefront, catalogLang, ready, so
 
   /** 搜索结果条目 → actions.mjs 的条目；歌曲单独播放，菜单里可前往专辑 */
   function targetOf(item) {
-    if (item.source === 'qq') {
-      return { kind: item.kind, source: 'qq', href: item.href, name: item.title, track: item.track,
+    if (['qq', 'ncm'].includes(item.source)) {
+      return { kind: item.kind, source: item.source, href: item.href, name: item.title, track: item.track,
         albumHref: item.track?.albumHref || '', ...(item.onPlay ? { onPlay: item.onPlay } : {}) };
     }
     return {

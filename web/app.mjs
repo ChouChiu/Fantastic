@@ -52,6 +52,10 @@ const VIEW_FILES = { new: 'browse', charts: 'browse', editorial: 'browse', radio
 const VIEWS = {
   home: ['/assets/views/home.html', () => import('/assets/views/home.mjs')],
   song: ['/assets/views/song.html', () => import('/assets/views/song.mjs')],
+  'ncm-song': ['/assets/views/ncm-song.html', () => import('/assets/views/ncm-song.mjs')],
+  'ncm-album': ['/assets/views/ncm-album.html', () => import('/assets/views/ncm-album.mjs')],
+  'ncm-artist': ['/assets/views/ncm-artist.html', () => import('/assets/views/ncm-artist.mjs')],
+  'ncm-playlist': ['/assets/views/ncm-playlist.html', () => import('/assets/views/ncm-playlist.mjs')],
   'qq-song': ['/assets/views/qq-song.html', () => import('/assets/views/qq-song.mjs')],
   'qq-artist': ['/assets/views/qq-artist.html', () => import('/assets/views/qq-artist.mjs')],
   'qq-album': ['/assets/views/qq-album.html', () => import('/assets/views/qq-album.mjs')],
@@ -80,6 +84,8 @@ function route(url) {
   if (url.pathname === '/') return 'home';
   const resource = regionlessResource(url.pathname);
   if (resource) return ({ songs: 'song', albums: 'album', playlists: 'playlist', artists: 'artist', 'music-videos': 'mv', 'uploaded-videos': 'post', stations: 'station' })[resource.type];
+  const ncmPage = url.pathname.match(/^\/ncm-(song|album|artist|playlist)\/[1-9][0-9]{0,18}\/?$/);
+  if (ncmPage && window.FANTASTIC_HOST?.ncmEnabled === true) return `ncm-${ncmPage[1]}`;
   if (/^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/songDetail\/[0-9A-Za-z]{1,32}\/?$/.test(url.pathname)) return 'qq-song';
   if (/^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/singer\/[0-9A-Za-z]{1,32}\/?$/.test(url.pathname)) return 'qq-artist';
   if (/^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/albumDetail\/[0-9A-Za-z]{1,32}\/?$/.test(url.pathname)) return 'qq-album';
@@ -184,7 +190,7 @@ import('/assets/lyrics/panel.mjs')
     function resolveTarget() {
       syncTarget();
       const id = targetId;
-      if (!id || resolved === id || player.current?.source === 'qq') return;
+      if (!id || resolved === id || ['qq', 'ncm'].includes(player.current?.source)) return;
       resolved = id;
       songTarget(player.current.track, player.current.country || 'us')
         .then((full) => { if (id === targetId) { target = full; favorite.refresh(); } })

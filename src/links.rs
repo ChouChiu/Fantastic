@@ -28,6 +28,13 @@ pub fn is_regionless_link(path: &str) -> bool {
     RE.is_match(path)
 }
 
+pub fn is_ncm_link(path: &str) -> bool {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^ncm-(?:song|album|artist|playlist)/([1-9][0-9]{0,18})/?$").unwrap()
+    });
+    RE.captures(path).is_some_and(|caps| caps[1].parse::<i64>().is_ok())
+}
+
 pub fn is_qq_link(path: &str) -> bool {
     static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^https:/{1,2}y\.qq\.com/n/ryqq/(?:songDetail|albumDetail|singer|playlist|mv/v)/([^/?#]+)/?$").unwrap());
     RE.captures(path).is_some_and(|caps| crate::qq::valid_mid(&caps[1]))
