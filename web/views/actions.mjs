@@ -79,6 +79,17 @@ function downloadSpec(target) {
   return null;
 }
 
+/** QQ 专辑 / 歌单页面已取到的曲目，交给同一个下载中心。 */
+function qqDownloadSpec(target) {
+  if (target.source !== 'qq' || !['album', 'playlist'].includes(target.kind) || !target.getTracks) return null;
+  const id = (target.href || '').match(/\/(?:albumDetail|playlist)\/([0-9A-Za-z]{1,32})\/?$/)?.[1];
+  return id ? { source: 'qq', kind: target.kind, id, title: target.name, tracks: target.getTracks(), quality: 'HQ' } : null;
+}
+
+function addQqDownload(spec, name, toast) {
+  return downloads.add(spec).then((job) => { if (job) toast(t('dlc.added', { name })); }, (err) => toast(err.message || String(err)));
+}
+
 function el(tag, props = {}, ...children) {
   const node = Object.assign(document.createElement(tag), props);
   node.append(...children.filter((c) => c !== null && c !== undefined && c !== false));
@@ -692,6 +703,10 @@ export function createActions({ signal, player, navigate, toast }) {
     if (target.kind === 'album' || target.kind === 'playlist' || target.onShuffle) {
       items.push({ icon: ICON.shuffle, label: t('action.shuffle'), onSelect: () => (target.onShuffle ? target.onShuffle() : play(target, button, true)) });
     }
+    if ((target.kind === 'album' || target.kind === 'playlist') && target.getTracks) {
+      const spec = qqDownloadSpec(target);
+      if (spec) items.push({ icon: ICON.download, label: t(`dlc.menu.${target.kind}`), onSelect: () => addQqDownload(spec, target.name, toast) });
+    }
     if (track) {
       const id = track.track ?? track.id;
       const href = track.href || adapter.songPath(id);
@@ -757,7 +772,12 @@ export function createActions({ signal, player, navigate, toast }) {
       e.stopPropagation();
       const m = getMenu(button);
       if (!m) return;
-      const entries = { ...(m.target ? { ...libraryEntries(m.target, button), ...linkEntries(m.target) } : {}), ...m.entries };
+      const targetEntries = m.target ? { ...libraryEntries(m.target, button), ...linkEntries(m.target) } : {};
+      const qqSpec = m.target && qqDownloadSpec(m.target);
+      if (qqSpec) targetEntries.download = {
+        icon: ICON.download, label: t(`dlc.menu.${m.target.kind}`), onSelect: () => addQqDownload(qqSpec, m.target.name, toast),
+      };
+      const entries = { ...targetEntries, ...m.entries };
       const items = [];
       for (const group of [...HEADER_MENU.map((keys) => keys.filter((key) => entries[key]).map((key) => entries[key])), m.tail || []]) {
         if (group.length) items.push(...(items.length ? ['-'] : []), ...group);

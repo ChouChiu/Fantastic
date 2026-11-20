@@ -162,6 +162,11 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
       const download = el('a', { className: 'variant-dl', href: row.downloadUrl, download: '', innerHTML: ICON.download });
       download.setAttribute('aria-label', t('qq.downloadQualityAria', { quality: label }));
       download.title = t('menu.download');
+      download.addEventListener('click', (event) => {
+        event.preventDefault?.();
+        if (!track) return;
+        qq.download(track, row.quality, row).catch((err) => toast(err.message || String(err)));
+      });
       const more = el('button', { className: 'variant-more more-btn', type: 'button', title: t('row.more'), innerHTML: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>' });
       more.setAttribute('aria-label', t('row.moreAria', { name: label }));
       more.setAttribute('aria-haspopup', 'menu');

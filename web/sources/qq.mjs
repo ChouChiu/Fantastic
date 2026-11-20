@@ -2,6 +2,7 @@
 import { trackKey, withIdentity } from './track.mjs';
 import { playbackQualityChain } from '../playback-quality.mjs';
 import { selectLyrics as selectCandidates } from '../lyrics/candidates.mjs';
+import { qqDownloadExtension, qqDownloadFilename } from '../download/naming.mjs';
 export { trackKey } from './track.mjs';
 const MID = /^[0-9A-Za-z]{1,32}$/;
 export const enabled = () => globalThis.window?.FANTASTIC_HOST?.qqEnabled === true;
@@ -229,6 +230,9 @@ export function qualityVariants(rows) {
   return rows.filter((row) => row.available === true && ['native', 'joc'].includes(row.playback))
     .map((row) => qualityVariant(row.quality, row));
 }
+
+export const downloadExtension = qqDownloadExtension;
+export const downloadFilename = qqDownloadFilename;
 async function request(path, signal) {
   const response = await fetch(path, { signal });
   if (!response.ok) {
@@ -361,9 +365,9 @@ export async function lyrics(id, parse, signal, prefer) {
   return { ...selectLyrics(data.candidates, parse, prefer),
     rawQrc: data.rawQrc === true, rawTrans: data.rawTrans === true, rawRoma: data.rawRoma === true };
 }
-export function download(track, quality) {
-  const link = document.createElement('a');
-  link.href = downloadUrl(track.track ?? track.id, quality);
-  link.download = '';
-  document.body.append(link); link.click(); link.remove();
+export function download(track, quality, row) {
+  const id = mid(track.track ?? track.id);
+  const downloads = globalThis.window?.AmDownloads || globalThis.AmDownloads;
+  if (!downloads?.add) return Promise.reject(new Error('Download center is unavailable'));
+  return downloads.add({ source: 'qq', kind: 'song', id, tracks: [track], quality: quality || 'HQ', row });
 }

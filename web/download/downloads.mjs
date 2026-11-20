@@ -24,7 +24,7 @@
 import { prefs, classify, pickVariant } from '../prefs.mjs';
 import { buildIlst, imageType } from './mp4-tags.mjs';
 import { buildZip, crc32 } from './zip.mjs';
-import { formatPath, formatName, fitFolder, fitFile, appendMediaExtension, stripAlbumSuffix } from './naming.mjs';
+import { formatPath, formatName, fitFolder, fitFile, appendMediaExtension, stripAlbumSuffix, qqDownloadFilename } from './naming.mjs';
 import { ttmlToLrc } from '../lyrics/lrc.mjs';
 import { parseMaster, pickMvVideo, pickMvAudio, mvQualityVars } from '../mv/hls.mjs';
 import { createFragmentScanner, tagValue, DEFECTS } from '../alac-check.mjs';
@@ -269,6 +269,7 @@ async function add(spec) {
   if (mode === 'folder' && !folder.supported) mode = 'zip';
   const job = {
     id: `j${++seq}`,
+    source: spec.source || 'apple',
     kind: spec.kind,
     cid: spec.id,
     country: (spec.country || AmI18n.storefront || 'us').toLowerCase(),
@@ -356,6 +357,27 @@ async function prepare(job, spec) {
   job.prepError = '';
   notify();
   try {
+    if (job.source === 'qq') {
+      const list = Array.isArray(spec.tracks) ? spec.tracks : [];
+      if (!list.length) throw new Error(t('dlc.noSongs'));
+      const quality = spec.variant || spec.quality || 'HQ';
+      job.title ||= spec.title || list[0].album || list[0].name || job.cid;
+      job.subtitle = list[0].artist || (list[0].artists || []).map((a) => typeof a === 'string' ? a : a?.name).filter(Boolean).join(', ');
+      job.artwork = list[0].artwork?.url || list[0].artwork || '';
+      job.collection = { name: job.title, artist: job.subtitle, id: job.cid, artwork: job.artwork, attributes: null, discCount: 0, total: list.length };
+      job.tasks = list.map((track, index) => ({
+        id: String(track.id || track.track || `${job.cid}-${index + 1}`), index: index + 1, mv: false,
+        name: String(track.name || track.title || track.id || ''),
+        artist: track.artist || (track.artists || []).map((a) => typeof a === 'string' ? a : a?.name).filter(Boolean).join(', '),
+        artwork: track.artwork?.url || track.artwork || job.artwork, song: track, qqTrack: track, qqQuality: quality, qqRow: spec.row || null,
+        state: 'queued', done: 0, total: 0, attempts: 0, throttles: 0, quality, check: null, error: '',
+      }));
+      job.folder = job.kind === 'album' || job.kind === 'playlist' ? fitFolder([job.title]) : [];
+      job.state = 'ready';
+      notify();
+      pump();
+      return;
+    }
     const cc = job.country;
     const l = job.options.metaLang || (await Promise.resolve(AmI18n.catalogLang(cc)).catch(() => undefined));
     job.lang = l;
@@ -586,7 +608,8 @@ async function runTask(job, task) {
     task.state = 'resolving';
     notify();
     const result = task.file ? await downloadFile(job, task, signal)
-      : await (task.mv ? downloadVideo : downloadSong)(job, task, trackInfo(job, task), signal);
+      : job.source === 'qq' ? await downloadQqSong(job, task, signal)
+        : await (task.mv ? downloadVideo : downloadSong)(job, task, trackInfo(job, task), signal);
     if (!result) {
       task.state = 'skipped';
       task.saved = true;
@@ -655,6 +678,63 @@ async function downloadFile(job, task, signal) {
   }, task);
   task.path = [out.name || task.fileName || 'file'];
   return { file: out.file, size: out.size ?? out.file.size, crc: out.crc ?? null, dispose: out.dispose || (() => {}) };
+}
+
+function fallbackDownload(url) {
+  const link = Object.assign(document.createElement('a'), { href: url, download: '' });
+  link.style.display = 'none';
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+/** QQ exposes a CORS-enabled CDN URL after the local 302; read it in the browser so the server carries no media bytes. */
+async function downloadQqSong(job, task, signal) {
+  const quality = task.qqQuality || job.variant || 'HQ';
+  const url = `/qq/song/${encodeURIComponent(task.id)}/download?quality=${encodeURIComponent(quality)}`;
+  const name = qqDownloadFilename(task.qqTrack || task.song, quality, task.qqRow || {});
+  task.path = [name];
+  if (await exists(job, task)) return null;
+  task.state = 'downloading';
+  notify();
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(`QQ download HTTP ${response.status}`);
+    const total = Number(response.headers?.get?.('content-length')) || 0;
+    task.total = total;
+    const reader = response.body?.getReader?.();
+    if (!reader) {
+      const blob = await response.blob();
+      task.done = blob.size;
+      task.total ||= blob.size;
+      addBytes(blob.size);
+      notify();
+      return { file: blob, size: blob.size, crc: null, dispose: () => {} };
+    }
+    const chunks = [];
+    let done = 0;
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      chunks.push(part.value);
+      done += part.value.byteLength;
+      task.done = done;
+      if (!task.total) task.total = done;
+      addBytes(part.value.byteLength);
+      notify();
+    }
+    task.done = done;
+    task.total ||= done;
+    notify();
+    const type = response.headers?.get?.('content-type') || 'application/octet-stream';
+    return { file: new Blob(chunks, { type }), size: done, crc: null, dispose: () => {} };
+  } catch (err) {
+    if (err?.name === 'AbortError' || signal.aborted) throw err;
+    // CDN CORS/network failures still get the old ordinary-link behavior. The CDN's
+    // own filename is then used by the browser, which is the only available fallback.
+    fallbackDownload(url);
+    return { file: null, size: 0, crc: null, fallback: true, dispose: () => {} };
+  }
 }
 
 /** 封面：拿不到时不影响下载，只是不写入 */
@@ -889,6 +969,23 @@ function lyricsFile(job, task) {
 
 /** 一首歌完成后：文件夹模式立即写入并删除临时文件；逐个保存模式交给浏览器；ZIP 模式留到最后打包 */
 async function deliver(job, task) {
+  if (job.source === 'qq') {
+    if (task.result.fallback) {
+      task.result = null;
+      task.saved = true;
+      return;
+    }
+    if (job.mode === 'folder' && job.dir) {
+      await writeFile(job.dir, [...job.folder, ...task.path], task.result.file);
+      task.result.dispose();
+      task.result = null;
+      task.saved = true;
+    } else if (job.mode === 'files' || single(job)) {
+      saveBlob(task.result.file, task.path.join(' - '));
+      task.saved = true;
+    }
+    return;
+  }
   const lyrics = lyricsFile(job, task);
   if (job.mode === 'folder' && job.dir) {
     await writeFile(job.dir, [...job.folder, ...task.path], task.result.file);
@@ -945,7 +1042,7 @@ async function finalize(job, force = false) {
   job.state = 'packing';
   notify();
   try {
-    const files = await extras(job);
+    const files = job.source === 'qq' ? [] : await extras(job);
     if (job.mode === 'folder' && job.dir) {
       for (const f of files) await writeFile(job.dir, [...job.folder, ...f.path], f.data);
     } else if (job.mode === 'files' || single(job)) {

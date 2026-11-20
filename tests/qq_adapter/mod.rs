@@ -70,7 +70,7 @@ fn proxy_cli_parameter_reaches_all_qq_clients_without_changing_other_clients() {
         let state =
             AppState::with_qq_proxy(cli.config().unwrap(), cli.qq_proxy.as_deref()).unwrap();
         let qq = state.qq.as_ref().unwrap();
-        for client in [&qq.api, &qq.media, &qq.cover] {
+        for client in [&qq.api, &qq.cover] {
             assert!(format!("{client:?}").contains("127.0.0.1:11080"));
         }
         // reqwest 0.12's Debug output is the only stable observable for proxy wiring here.
@@ -95,7 +95,6 @@ fn absent_or_blank_proxy_preserves_default_clients() {
         let state = AppState::with_qq_proxy(cli.config().unwrap(), proxy).unwrap();
         let qq = state.qq.as_ref().unwrap();
         assert_eq!(format!("{:?}", qq.api), format!("{:?}", default.api));
-        assert_eq!(format!("{:?}", qq.media), format!("{:?}", default.media));
         assert_eq!(format!("{:?}", qq.cover), format!("{:?}", default.cover));
     }
 }
@@ -1390,158 +1389,28 @@ async fn playback_redirect_has_no_audio_or_json_body() {
 }
 
 #[tokio::test]
-async fn download_upstream_non_2xx_returns_502() {
+async fn download_redirects_to_cached_cdn_url_without_fetching_audio() {
     let hits = Arc::new(AtomicUsize::new(0));
     let seen = hits.clone();
     let upstream = Router::new().fallback(any(move || {
         seen.fetch_add(1, Ordering::SeqCst);
-        async { StatusCode::FORBIDDEN }
-    }));
-    let Some((base, task)) = serve_local(upstream).await else {
-        return;
-    };
-    let state = state(true);
-    let qq = state.qq.as_ref().unwrap();
-    let mid = "downloadtest";
-    qq.songs.put(
-        mid.into(),
-        Song {
-            id: mid.into(),
-            name: "Song".into(),
-            artists: vec!["Artist".into()],
-            album: "Album".into(),
-            album_mid: "album".into(),
-            duration_ms: 1000,
-            cover: String::new(),
-            vip: false,
-            ttml: false,
-            mv: String::new(),
-        },
-    );
-    qq.audio.put(
-        Quality::Hq.cache_key(mid),
-        Audio {
-            url: reqwest::Url::parse(&format!("{base}/track.mp3")).unwrap(),
-            size_bytes: Some(4),
-            codec_hint: None,
-        },
-    );
-    let response = get(state, &format!("/qq/song/{mid}/download?quality=HQ")).await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(hits.load(Ordering::SeqCst), 1);
-    task.abort();
-}
-
-#[tokio::test]
-async fn download_success_transfers_headers_and_body() {
-    let upstream = Router::new().fallback(any(|| async {
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "audio/mpeg")
-            .header(header::CONTENT_LENGTH, "4")
-            .body(Body::from("data"))
-            .unwrap()
-    }));
-    let Some((base, task)) = serve_local(upstream).await else { return; };
-    let state = state(true);
-    let qq = state.qq.as_ref().unwrap();
-    let mid = "downloadok";
-    qq.songs.put(mid.into(), Song {
-        id: mid.into(), name: "Song".into(), artists: vec!["Artist".into()], album: "Album".into(),
-        album_mid: "album".into(), duration_ms: 1000, cover: String::new(), vip: false, ttml: false, mv: String::new(),
-    });
-    qq.audio.put(Quality::Hq.cache_key(mid), Audio {
-        url: reqwest::Url::parse(&format!("{base}/track.mp3")).unwrap(), size_bytes: Some(4), codec_hint: None,
-    });
-    let response = get(state, &format!("/qq/song/{mid}/download?quality=HQ")).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()[header::CONTENT_TYPE], "audio/mpeg");
-    assert_eq!(response.headers()[header::CONTENT_DISPOSITION], "attachment; filename=\"download.mp3\"; filename*=UTF-8''%41%72%74%69%73%74%20%2D%20%53%6F%6E%67%2E%6D%70%33");
-    assert_eq!(response.headers()[header::CONTENT_LENGTH], "4");
-    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
-    assert_eq!(to_bytes(response.into_body(), 100).await.unwrap().as_ref(), b"data");
-    task.abort();
-}
-
-#[tokio::test]
-async fn download_redirect_from_upstream_is_hidden_as_502() {
-    let upstream = Router::new().fallback(any(|| async {
-        Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, "https://evil.example.invalid/audio.mp3")
-            .body(Body::empty())
-            .unwrap()
+        async { StatusCode::INTERNAL_SERVER_ERROR }
     }));
     let Some((base, task)) = serve_local(upstream).await else { return; };
     let state = state(true);
     let qq = state.qq.as_ref().unwrap();
     let mid = "downloadredirect";
-    qq.songs.put(mid.into(), Song {
-        id: mid.into(), name: "Song".into(), artists: vec!["Artist".into()], album: "Album".into(),
-        album_mid: "album".into(), duration_ms: 1000, cover: String::new(), vip: false, ttml: false, mv: String::new(),
-    });
-    qq.audio.put(Quality::Hq.cache_key(mid), Audio {
-        url: reqwest::Url::parse(&format!("{base}/track.mp3")).unwrap(), size_bytes: Some(4), codec_hint: None,
-    });
-    assert_eq!(get(state, &format!("/qq/song/{mid}/download?quality=HQ")).await.status(), StatusCode::BAD_GATEWAY);
-    task.abort();
-}
-
-#[tokio::test]
-async fn media_redirect_to_non_allowlisted_host_stops_at_302() {
-    let upstream = Router::new().fallback(any(|| async {
-        Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, "https://evil.example.invalid/audio.mp3")
-            .body(Body::empty())
-            .unwrap()
-    }));
-    let Some((base, task)) = serve_local(upstream).await else {
-        return;
-    };
-    let response = qq()
-        .media
-        .get(format!("{base}/start"))
-        .send()
-        .await
-        .unwrap();
+    let url = reqwest::Url::parse(&format!("{base}/track.mp3")).unwrap();
+    qq.audio.put(Quality::Hq.cache_key(mid), Audio { url: url.clone(), size_bytes: Some(4), codec_hint: None });
+    let response = get(state, &format!("/qq/song/{mid}/download?quality=HQ")).await;
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(
-        response.headers()[header::LOCATION],
-        "https://evil.example.invalid/audio.mp3"
-    );
+    assert_eq!(response.headers()[header::LOCATION], url.as_str());
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert!(to_bytes(response.into_body(), 100).await.unwrap().is_empty());
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
     task.abort();
 }
 
-#[test]
-fn download_filename_uses_metadata_and_keeps_the_cdn_extension() {
-    let mut song = qq().song_dto(&raw_song()).unwrap();
-    let url = reqwest::Url::parse("https://y.qq.com/test.flac?private=secret").unwrap();
-    let value = download_disposition(&song, &url);
-    assert!(value.contains("filename=\"download.flac\""));
-    assert!(value.contains(
-        "filename*=UTF-8''%E5%91%A8%E6%9D%B0%E4%BC%A6%20%2D%20%E6%99%B4%E5%A4%A9%2E%66%6C%61%63"
-    ));
-    assert!(!value.contains("secret"));
-    song.name = "very long name / \r\n".repeat(40);
-    assert!(download_disposition(&song, &url).ends_with("%2E%66%6C%61%63"));
-    let no_extension = reqwest::Url::parse("https://y.qq.com/audio").unwrap();
-    assert!(download_disposition(&song, &no_extension).contains("download.m4a"));
-}
-
-#[test]
-fn filename_sanitizing_handles_empty_and_windows_reserved_bases() {
-    let url = reqwest::Url::parse("https://y.qq.com/audio.flac").unwrap();
-    let mut song = qq().song_dto(&raw_song()).unwrap();
-    song.id = "mid123".into();
-    song.artists.clear();
-    song.name.clear();
-    let empty = download_disposition(&song, &url);
-    assert!(empty.contains("%6D%69%64%31%32%33%2E%66%6C%61%63"));
-    song.id = "CON".into();
-    let reserved = download_disposition(&song, &url);
-    assert!(reserved.contains("%43%4F%4E%5F%2E%66%6C%61%63"));
-}
 #[test]
 fn album_mid_is_recovered_from_public_cover_when_album_id_is_numeric() {
     let mut raw = raw_song();
@@ -1869,24 +1738,6 @@ fn explicit_codec_metadata_precedes_container_and_size_and_stays_allowlisted() {
     assert_eq!(row.playback, Playback::Download);
     assert_eq!(row.codec, "unknown");
     assert!(!serde_json::to_string(&row).unwrap().contains("private"));
-}
-
-#[test]
-fn download_content_types_follow_an_allowlisted_file_extension() {
-    for (extension, expected) in [
-        ("mp3", "audio/mpeg"),
-        ("FLAC", "audio/flac"),
-        ("m4a", "audio/mp4"),
-        ("aac", "audio/aac"),
-        ("ogg", "audio/ogg"),
-        ("ape", "audio/x-ape"),
-        ("nac", "application/octet-stream"),
-        ("html", "application/octet-stream"),
-    ] {
-        let url =
-            reqwest::Url::parse(&format!("https://y.qq.com/song.{extension}?x=.html")).unwrap();
-        assert_eq!(download_content_type(&url), expected);
-    }
 }
 
 #[tokio::test]

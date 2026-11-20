@@ -206,7 +206,6 @@ pub struct Qq {
     base: String,
     amll: String,
     api: reqwest::Client,
-    media: reqwest::Client,
     cover: reqwest::Client,
     permits: tokio::sync::Semaphore,
     rate: crate::wrapper::RateLimit,
@@ -229,18 +228,6 @@ impl Qq {
             .user_agent("fantastic")
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15));
-        let mut media = reqwest::Client::builder()
-            .http1_only()
-            .user_agent("fantastic")
-            .connect_timeout(Duration::from_secs(5))
-            .read_timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::custom(|a| {
-                if a.previous().len() < 5 && cdn_url(a.url().as_str()).is_some() {
-                    a.follow()
-                } else {
-                    a.stop()
-                }
-            }));
         // Artwork accepts exactly cover_url's template, including across redirects.
         let mut cover = reqwest::Client::builder()
             .http1_only()
@@ -250,7 +237,6 @@ impl Qq {
             .redirect(reqwest::redirect::Policy::none());
         if let Some(proxy) = proxy {
             api = api.proxy(proxy.clone());
-            media = media.proxy(proxy.clone());
             cover = cover.proxy(proxy);
         }
         Ok(Self {
@@ -259,9 +245,6 @@ impl Qq {
             api: api
                 .build()
                 .map_err(|e| format!("QQ API client: {}", e.without_url()))?,
-            media: media
-                .build()
-                .map_err(|e| format!("QQ CDN client: {}", e.without_url()))?,
             cover: cover
                 .build()
                 .map_err(|e| format!("QQ cover client: {}", e.without_url()))?,
@@ -928,44 +911,38 @@ struct ExtensionInfo {
     extension: &'static str,
     codec: Codec,
     content_type: &'static str,
-    download_content_type: &'static str,
 }
 const fn ext(
     extension: &'static str,
     codec: Codec,
     content_type: &'static str,
-    download_content_type: &'static str,
 ) -> ExtensionInfo {
     ExtensionInfo {
         extension,
         codec,
         content_type,
-        download_content_type,
     }
 }
 
-// The playback MIME and the attachment MIME intentionally remain separate:
-// browsers need codec parameters while downloaded files should retain their
-// conventional raw-media type (for example .aac and .ac4).
 #[rustfmt::skip]
 const EXTENSION_INFO: &[ExtensionInfo] = &[
-    ext("mp3", Codec::Mp3, "audio/mpeg", "audio/mpeg"),
-    ext("flac", Codec::Flac, "audio/flac", "audio/flac"),
-    ext("m4a", Codec::Aac, "audio/mp4; codecs=\"mp4a.40.2\"", "audio/mp4"),
-    ext("mp4", Codec::Unknown, "application/octet-stream", "audio/mp4"),
-    ext("aac", Codec::Aac, "audio/aac", "audio/aac"),
-    ext("ogg", Codec::Ogg, "audio/ogg; codecs=\"vorbis\"", "audio/ogg"),
-    ext("opus", Codec::Opus, "audio/ogg; codecs=\"opus\"", "audio/ogg"),
-    ext("wav", Codec::Wav, "audio/wav", "audio/wav"),
-    ext("ape", Codec::Ape, "audio/x-ape", "audio/x-ape"),
-    ext("eac3", Codec::Ec3, "audio/mp4; codecs=\"ec-3\"", "audio/eac3"),
-    ext("ec3", Codec::Ec3, "audio/mp4; codecs=\"ec-3\"", "audio/eac3"),
-    ext("joc", Codec::Ec3, "audio/mp4; codecs=\"ec-3\"", "audio/eac3"),
-    ext("ac3", Codec::Ac3, "audio/mp4; codecs=\"ac-3\"", "audio/ac3"),
-    ext("ac4", Codec::Ac4, "audio/mp4; codecs=\"ac-4\"", "audio/ac4"),
-    ext("dts", Codec::Dts, "audio/vnd.dts", "audio/vnd.dts"),
-    ext("dtsx", Codec::Dtsx, "audio/vnd.dts.hd; codecs=\"dtsx\"", "audio/vnd.dts.hd"),
-    ext("nac", Codec::Nac, "audio/x-nac", "application/octet-stream"),
+    ext("mp3", Codec::Mp3, "audio/mpeg"),
+    ext("flac", Codec::Flac, "audio/flac"),
+    ext("m4a", Codec::Aac, "audio/mp4; codecs=\"mp4a.40.2\""),
+    ext("mp4", Codec::Unknown, "application/octet-stream"),
+    ext("aac", Codec::Aac, "audio/aac"),
+    ext("ogg", Codec::Ogg, "audio/ogg; codecs=\"vorbis\""),
+    ext("opus", Codec::Opus, "audio/ogg; codecs=\"opus\""),
+    ext("wav", Codec::Wav, "audio/wav"),
+    ext("ape", Codec::Ape, "audio/x-ape"),
+    ext("eac3", Codec::Ec3, "audio/mp4; codecs=\"ec-3\""),
+    ext("ec3", Codec::Ec3, "audio/mp4; codecs=\"ec-3\""),
+    ext("joc", Codec::Ec3, "audio/mp4; codecs=\"ec-3\""),
+    ext("ac3", Codec::Ac3, "audio/mp4; codecs=\"ac-3\""),
+    ext("ac4", Codec::Ac4, "audio/mp4; codecs=\"ac-4\""),
+    ext("dts", Codec::Dts, "audio/vnd.dts"),
+    ext("dtsx", Codec::Dtsx, "audio/vnd.dts.hd; codecs=\"dtsx\""),
+    ext("nac", Codec::Nac, "audio/x-nac"),
 ];
 
 fn extension_info(extension: &str) -> Option<ExtensionInfo> {
@@ -1962,20 +1939,6 @@ fn play_redirect(url: &reqwest::Url) -> Response {
         .body(Body::empty())
         .unwrap()
 }
-fn download_disposition(song: &Song, url: &reqwest::Url) -> String {
-    let ext = url
-        .path()
-        .rsplit('.')
-        .next()
-        .filter(|s| !s.is_empty() && s.len() <= 5 && s.bytes().all(|b| b.is_ascii_alphanumeric()))
-        .unwrap_or("m4a");
-    attachment(&safe_basename(song), ext)
-}
-fn download_content_type(url: &reqwest::Url) -> &'static str {
-    extension_info(&url_extension(url))
-        .map(|info| info.download_content_type)
-        .unwrap_or("application/octet-stream")
-}
 #[derive(Default, Deserialize)]
 struct RawLyricsQuery {
     kind: Option<String>,
@@ -2047,25 +2010,8 @@ async fn download(
 ) -> ApiResult<Response> {
     let qq = adapter(&state)?;
     check_mid(&mid)?;
-    let song = qq.song(&mid).await?;
     let url = qq.audio_url(&mid, query.quality()).await?.url;
-    let response = qq.media.get(url.clone()).send().await.map_err(network)?;
-    let status = response.status();
-    if !status.is_success() {
-        tracing::warn!("qq download upstream status: {status}");
-        return Err(unavailable());
-    }
-    let mut out = Response::builder()
-        .header(header::CONTENT_TYPE, download_content_type(&url))
-        .header(
-            header::CONTENT_DISPOSITION,
-            download_disposition(&song, &url),
-        )
-        .header(header::CACHE_CONTROL, "no-store");
-    if let Some(size) = response.headers().get(header::CONTENT_LENGTH) {
-        out = out.header(header::CONTENT_LENGTH, size);
-    }
-    Ok(out.body(stream_body(response)).unwrap())
+    Ok(play_redirect(&url))
 }
 fn xml(text: &str) -> String {
     text.replace('&', "&amp;")

@@ -28,6 +28,42 @@ export const TEMPLATE_SCOPES = {
   singleFile: SONG_VARS,
 };
 
+const QQ_DOWNLOAD_CODECS = Object.freeze({
+  MP3128: 'mp3', HQ: 'mp3', AAC48: 'aac', WEB: 'aac', AAC192: 'aac',
+  OGG96: 'vorbis', OGG192: 'vorbis', SQ: 'flac', RS: 'flac', QAI: 'flac', Q360V1: 'flac', Q360V2: 'flac',
+  NAC: 'nac', RA360: 'unknown', DTS: 'dts', DTSX: 'dtsx', DA: 'ac-4', DAEAC3: 'ec-3', DA448: 'ac-4', DA1500: 'ac-4',
+});
+const QQ_DOWNLOAD_EXTENSIONS = Object.freeze({
+  mp3: 'mp3', flac: 'flac', aac: 'm4a', vorbis: 'ogg', opus: 'opus', pcm: 'wav', ape: 'ape',
+  'ec-3': 'eac3', ec3: 'eac3', eac3: 'eac3', 'e-ac-3': 'eac3', 'eac3-joc': 'eac3', joc: 'eac3',
+  'ac-3': 'ac3', ac3: 'ac3', 'ac-4': 'ac4', ac4: 'ac4',
+  dts: 'dts', dtsc: 'dts', dtsx: 'dtsx', 'dts:x': 'dtsx', 'dtsx.0': 'dtsx', nac: 'nac', aicodec: 'nac', unknown: 'mp4',
+});
+const QQ_DOWNLOAD_RESERVED = new Set([
+  'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+]);
+export function qqDownloadExtension(quality = 'HQ', row = {}) {
+  const raw = typeof row.codec === 'string' && row.codec ? row.codec.toLowerCase() : QQ_DOWNLOAD_CODECS[quality] || 'aac';
+  const codec = raw === 'mp4a.40.2' ? 'aac' : raw;
+  return QQ_DOWNLOAD_EXTENSIONS[codec] || 'm4a';
+}
+export function qqDownloadFilename(track, quality = 'HQ', row = {}) {
+  const artistList = Array.isArray(track?.artists) && track.artists.length ? track.artists : [track?.artist];
+  const artists = artistList
+    .map((artist) => typeof artist === 'string' ? artist : artist?.name)
+    .filter((artist) => typeof artist === 'string' && artist.length)
+    .join(', ');
+  const name = String(track?.name || track?.title || '');
+  const id = String(track?.id || track?.track || 'qq');
+  const raw = artists && name ? `${artists} - ${name}` : artists || name || id;
+  let base = [...raw].filter((char) => !/[\/\\:*?"<>|\u0000-\u001f\u007f-\u009f]/u.test(char)).slice(0, 160).join('')
+    .trim().replace(/^\.+|\.+$/g, '').trim();
+  if (!base) base = id;
+  if (QQ_DOWNLOAD_RESERVED.has(base.toUpperCase())) base += '_';
+  return `${base}.${qqDownloadExtension(quality, row)}`;
+}
+
 // Apple Music 给 EP / 单曲的专辑名附加的分类后缀（各店面、各元数据语言都是这两个英文词）：只认末尾
 // 「空白 - 空白」分隔、大小写一致的，「夏のせい ep」「Re-Single」这类名字本身的文字不动
 const ALBUM_SUFFIX = /\s+-\s+(?:EP|Single)\s*$/;
