@@ -68,9 +68,17 @@ export function withSecurityHeaders(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-export function isPagePath(pathname) {
+export function isPagePath(pathname, search = '') {
+  const queryAt = pathname.indexOf('?');
+  if (queryAt >= 0) {
+    if (!search) search = pathname.slice(queryAt);
+    pathname = pathname.slice(0, queryAt);
+  }
   const path = pathname.replace(/^\//, '');
-  return /^https:\/{1,2}y\.qq\.com\/n\/ryqq\/(?:songDetail|albumDetail|singer|playlist|mv\/v)\/[0-9A-Za-z]{1,32}\/?$/.test(path)
+  const ncm = /^(?:ncm-(?:song|album|artist|playlist)\/[1-9][0-9]{0,18}\/?|https:\/{1,2}music\.163\.com\/(?:song|album|artist|playlist)\/?)$/.test(path)
+    && (!path.startsWith('https:') || /^\?id=[1-9][0-9]{0,18}(?:&[^#]*)?$/.test(search));
+  return ncm
+    || /^https:\/{1,2}y\.qq\.com\/n\/ryqq\/(?:songDetail|albumDetail|singer|playlist|mv\/v)\/[0-9A-Za-z]{1,32}\/?$/.test(path)
     || SITE_PAGE_RE.test(path.replace(/^(https:\/{1,2}music\.apple\.com\/)(?=song\/|album\/|artist\/|playlist\/|music-video\/|post\/|station\/)/, '$1us/'))
     || path === '' || LOCAL_PAGE_RE.test(path) || SITE_PAGE_RE.test(path);
 }

@@ -27,10 +27,10 @@ test('NCM song renders quality groups, plays/enqueues NCM identity and downloads
     { quality: 'standard', available: true, sizeBytes: 1000 }, { quality: 'lossless', available: true, sizeBytes: 2000 }] }
     : path.endsWith('/lyrics') ? { candidates: [{ source: 'yrc', text: '[1000,500](1000,200,0)海(1200,300,0)阔天空' }], rawYrc: true }
       : { id: '347230', name: '海阔天空', artists: [{ name: 'Beyond', mid: '11127' }], albumMid: '34209', album: '乐与怒', vip: true } });
-  mount({ root, signal, player, url: new URL('https://test/ncm-song/347230'), onLangChange: (fn) => { rerender = fn; }, toast() {} });
+  mount({ root, signal, player, url: new URL('https://test/https://music.163.com/song?id=347230'), onLangChange: (fn) => { rerender = fn; }, toast() {} });
   await settle();
   assert.equal(root.querySelector('#title').textContent, '海阔天空');
-  assert.equal(root.querySelector('#subtitle').querySelector('a').href, '/ncm-artist/11127');
+  assert.equal(root.querySelector('#subtitle').querySelector('a').href, '/https://music.163.com/artist?id=11127');
   assert.ok(root.querySelector('#badges').textContent.includes('source.ncm'));
   const groups = root.querySelector('#variant-list').children;
   assert.equal(groups.length, 2);
@@ -44,6 +44,30 @@ test('NCM song renders quality groups, plays/enqueues NCM identity and downloads
   assert.equal(root.querySelector('#lyrics-lines').textContent, '海阔天空');
   assert.equal(root.querySelector('#lyrics-qrc').href, '/ncm/song/347230/lyrics/raw?kind=yrc');
   rerender(); assert.equal(root.querySelector('#lyrics-lines').textContent, '海阔天空');
+});
+
+test('NCM routes official query paths and legacy aliases behind the enable gate', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { runInNewContext } = await import('node:vm');
+  const source = readFileSync(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('const LIBRARY_PATH');
+  const end = source.indexOf('/* ---------- 常驻', start);
+  const code = source.slice(start, end).replace('export function route', 'function route');
+  const env = (enabled) => ({
+    location: new URL('https://test/'), window: { FANTASTIC_HOST: { ncmEnabled: enabled } },
+    regionlessResource: () => null, PAGES: [], CHARTS_PATH: /$^/,
+  });
+  const route = (enabled) => runInNewContext(`${code}\nroute`, env(enabled));
+  const on = route(true);
+  for (const kind of ['song', 'album', 'artist', 'playlist']) {
+    assert.equal(on(new URL(`https://test/https://music.163.com/${kind}?id=347230`)), `ncm-${kind}`);
+    assert.equal(on(new URL(`https://test/ncm-${kind}/347230`)), `ncm-${kind}`);
+    assert.equal(on(new URL(`https://test/https:/music.163.com/${kind}?id=347230`)), `ncm-${kind}`);
+    assert.equal(on(new URL(`https://test/https://music.163.com/${kind}?id=0`)), null);
+  }
+  const off = route(false);
+  assert.equal(off(new URL('https://test/https://music.163.com/song?id=347230')), null);
+  assert.equal(off(new URL('https://test/ncm-song/347230')), null);
 });
 
 test('settings contain no cookie controls or requests', async () => {
@@ -83,10 +107,10 @@ test('NCM album, artist and playlist render local navigation and play source-spe
     await root.querySelector('#play-all').click();
     assert.equal(played[0][0].key, 'ncm:347230');
     if (kind === 'artist') {
-      assert.equal(root.querySelector('#shelves').querySelector('a').href, '/ncm-album/34209');
-      assert.equal(root.querySelector('#tracks').querySelector('.track-artist').querySelector('a').href, '/ncm-album/34209');
+      assert.equal(root.querySelector('#shelves').querySelector('a').href, '/https://music.163.com/album?id=34209');
+      assert.equal(root.querySelector('#tracks').querySelector('.track-artist').querySelector('a').href, '/https://music.163.com/album?id=34209');
     }
-    if (kind === 'album') assert.equal(root.querySelector('#artist').querySelector('a').href, '/ncm-artist/11127');
+    if (kind === 'album') assert.equal(root.querySelector('#artist').querySelector('a').href, '/https://music.163.com/artist?id=11127');
   }
 });
 

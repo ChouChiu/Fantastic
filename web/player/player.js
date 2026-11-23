@@ -3327,7 +3327,12 @@
           li.title = t('qq.openSong');
           const link = doc.createElement('a');
           link.className = 'queue-name';
-          link.href = entry.source === 'ncm' ? `/ncm-song/${entry.track}` : `/https://y.qq.com/n/ryqq/songDetail/${entry.track}`;
+          // NCM entries already carry the path built by ncm.songPath(); retaining it
+          // also keeps legacy saved queue entries on their compatible alias.
+          if (entry.source === 'ncm') {
+            link.href = entry.href || '';
+            if (!entry.href) loadNcm().then((ncm) => { if (link.isConnected) link.href = ncm.songPath(entry.track); }).catch(() => {});
+          } else link.href = `/https://y.qq.com/n/ryqq/songDetail/${entry.track}`;
           name.replaceWith(link);
           const play = doc.createElement('button');
           play.type = 'button';

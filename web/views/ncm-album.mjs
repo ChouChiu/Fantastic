@@ -10,7 +10,7 @@ export const styles = ['/assets/views/qq-album.css'];
 export function mount({ root, url, signal, player, navigate, onLangChange, toast }) {
   const { t } = window.AmI18n;
   const $ = (id) => root.querySelector(`#${id}`);
-  const albumMid = url.pathname.match(/^\/ncm-album\/([1-9][0-9]{0,18})\/?$/)?.[1];
+  const albumMid = ncm.parsePageId(url, 'album');
   const actions = createActions({ signal, player, navigate, toast });
   const header = createDetailHeader({ $, signal, artUrl, rerender: renderHeader });
   let album = null;

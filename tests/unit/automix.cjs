@@ -168,6 +168,8 @@ test('equal-power gain curves', () => {
 
 test('album id from albumHref', () => {
   assert.equal(A.albumOf({ albumHref: '/cn/album/1989/1713845538' }), '1713845538');
+  assert.equal(A.albumOf({ albumHref: '/https://music.163.com/album?id=34209' }), '34209');
+  assert.equal(A.albumOf({ albumHref: '/ncm-album/34209' }), '34209');
   assert.equal(A.albumOf({ albumHref: '' }), '');
   assert.equal(A.albumOf(null), '');
 });

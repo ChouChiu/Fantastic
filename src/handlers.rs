@@ -27,9 +27,10 @@ pub async fn fallback_handler(uri: Uri, headers: HeaderMap) -> Response<Body> {
     let path = uri.path().strip_prefix('/').unwrap_or(uri.path());
     let normalized = path.replacen("https:/music.apple.com/", "https://music.apple.com/", 1);
     let path = normalized.as_str();
+    let ncm_path = uri.query().map_or_else(|| path.to_owned(), |query| format!("{path}?{query}"));
     if crate::links::is_regionless_link(path)
         || crate::links::is_qq_link(path)
-        || crate::links::is_ncm_link(path)
+        || crate::links::is_ncm_link(&ncm_path)
         || parse_song_link(path).is_ok()
         || parse_mv_link(path).is_ok()
         || parse_post_link(path).is_ok()
@@ -425,13 +426,13 @@ mod tests {
     #[tokio::test]
     async fn not_found_is_not_cached() {
         // 旧版本的内容哈希地址与其他未知路径：404 不能被浏览器或 CDN 缓存
-        for path in ["/assets/h/app.0000000000000000.mjs", "/assets/h/x.0000000000000000.js", "/nope", "/qq-song/123", "/qq-album/123", "/qq-artist/123", "/qq-playlist/123", "/qq-mv/123", "/https://y.qq.com/n/ryqq/songDetail/../bad", "/https://y.qq.com/n/ryqq/songDetail/123//"] {
+        for path in ["/assets/h/app.0000000000000000.mjs", "/assets/h/x.0000000000000000.js", "/nope", "/qq-song/123", "/qq-album/123", "/qq-artist/123", "/qq-playlist/123", "/qq-mv/123", "/https://y.qq.com/n/ryqq/songDetail/../bad", "/https://y.qq.com/n/ryqq/songDetail/123//", "/https://music.163.com/song?id=0", "/https://music.163.com/song?foo=1&id=123"] {
             let response = fallback_handler(path.parse().unwrap(), HeaderMap::new()).await;
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
             assert_eq!(response.headers()[axum::http::header::CACHE_CONTROL], "no-store", "{path}");
         }
         // 页面地址仍返回外壳
-        for path in ["/https://music.apple.com/song/name/123?i=456", "/https:/music.apple.com/album/123", "/https:/y.qq.com/n/ryqq/songDetail/123/?x=1", "/library/songs", "/radio", "/https://music.apple.com/us/station/apple-music-1/ra.978194965", "/https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV", "/https://y.qq.com/n/ryqq/songDetail/123/", "/https://y.qq.com/n/ryqq/singer/0025NhlN2yWrP4", "/https://y.qq.com/n/ryqq/albumDetail/000MkMni19ClKG", "/https://y.qq.com/n/ryqq/playlist/7039749142", "/https://y.qq.com/n/ryqq/mv/v/w0026q7f01a"] {
+        for path in ["/https://music.apple.com/song/name/123?i=456", "/https:/music.apple.com/album/123", "/https:/y.qq.com/n/ryqq/songDetail/123/?x=1", "/library/songs", "/radio", "/https://music.apple.com/us/station/apple-music-1/ra.978194965", "/https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV", "/https://y.qq.com/n/ryqq/songDetail/123/", "/https://y.qq.com/n/ryqq/singer/0025NhlN2yWrP4", "/https://y.qq.com/n/ryqq/albumDetail/000MkMni19ClKG", "/https://y.qq.com/n/ryqq/playlist/7039749142", "/https://y.qq.com/n/ryqq/mv/v/w0026q7f01a", "/https://music.163.com/song?id=347230", "/https:/music.163.com/album?id=347230&foo=bar", "/ncm-artist/347230"] {
             let page = fallback_handler(path.parse().unwrap(), HeaderMap::new()).await;
             assert_eq!(page.status(), StatusCode::OK, "{path}");
         }

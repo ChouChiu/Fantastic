@@ -37,10 +37,26 @@ test('NCM identity, DTO links and library snapshots cannot collide with Apple or
   assert.equal(playerKey(ncm.entryOf(track)), track.key);
   assert.deepEqual(new Set(['apple', 'qq', 'ncm'].map((source) => trackKey({ source, id: dto.id }))).size, 3);
   assert.equal(withIdentity({ id: dto.id }).source, 'apple');
-  assert.equal(track.href, '/ncm-song/347230');
-  assert.equal(track.albumHref, '/ncm-album/34209');
-  assert.equal(track.artists[0].href, '/ncm-artist/11127');
+  assert.equal(track.href, '/https://music.163.com/song?id=347230');
+  assert.equal(track.albumHref, '/https://music.163.com/album?id=34209');
+  assert.equal(track.artists[0].href, '/https://music.163.com/artist?id=11127');
   assert.equal(ncm.webUrl(track.href), 'https://music.163.com/song?id=347230');
+  assert.equal(ncm.webUrl('/ncm-song/347230'), 'https://music.163.com/song?id=347230');
+  assert.equal(ncm.webUrl('/https:/music.163.com/song?id=347230'), 'https://music.163.com/song?id=347230');
+  assert.equal(ncm.webUrl('/https://music.163.com/song?id=0'), '');
+  assert.equal(ncm.webUrl(ncm.albumPath('34209')), 'https://music.163.com/album?id=34209');
+  assert.equal(ncm.webUrl('/ncm-artist/11127'), 'https://music.163.com/artist?id=11127');
+  assert.equal(ncm.webUrl(ncm.playlistPath('1')), 'https://music.163.com/playlist?id=1');
+
+  for (const [kind, path] of [['song', track.href], ['album', track.albumHref], ['artist', track.artists[0].href], ['playlist', ncm.playlistPath('1')]]) {
+    assert.equal(ncm.parsePageId(new URL(`https://test${path}`), kind), kind === 'song' ? '347230' : kind === 'album' ? '34209' : kind === 'artist' ? '11127' : '1');
+    assert.equal(ncm.parsePageId(new URL(`https://test/ncm-${kind}/${kind === 'song' ? '347230' : kind === 'album' ? '34209' : kind === 'artist' ? '11127' : '1'}`), kind), kind === 'song' ? '347230' : kind === 'album' ? '34209' : kind === 'artist' ? '11127' : '1');
+  }
+  for (const kind of ['song', 'album', 'artist', 'playlist']) {
+    assert.equal(ncm.parseWebLink(`https://music.163.com/${kind}?id=347230`), `https://music.163.com/${kind}?id=347230`);
+  }
+  assert.equal(ncm.parseWebLink('https://music.163.com/#/playlist?id=1'), 'https://music.163.com/playlist?id=1');
+  assert.equal(ncm.parseWebLink('https://music.163.com/song?id=0'), null);
   assert.equal(JSON.stringify(track).includes('private'), false);
   library.addToLibrary([track]);
   const ncmTrack = library.libraryItem('song', dto.id, 'ncm');

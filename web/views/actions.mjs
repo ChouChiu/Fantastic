@@ -203,7 +203,7 @@ export function nowPlayingTarget(current) {
     kind: 'song', href, apple: href.slice(1), name: current.title || '', country: current.country, albumHref, noPlay: true,
     track: {
       kind: 'song', id: current.track, country: current.country, name: current.title || '', artist: current.artist || '',
-      artists: current.artists || [], album: current.album || '', albumId: (albumHref.match(/\/(\d+)$/) || [])[1] || '', albumHref, href,
+      artists: current.artists || [], album: current.album || '', albumId: albumIdOf(albumHref), albumHref, href,
       artwork: (current.artwork || '').replace(/\/\d+x\d+(\w*)\.(jpg|png|webp)$/, '/{w}x{h}$1.$2'), bgColor: '', duration: 0, explicit: false,
     },
   };
@@ -234,7 +234,7 @@ export function snapshotOf(track, country, album) {
       .filter((artist) => artist.attributes && artist.attributes.name)
       .map((artist) => ({ name: artist.attributes.name, href: pagePath(artist, country) })),
     album: a.albumName || (album && album.attributes && album.attributes.name) || '',
-    albumId: (albumHref.match(/\/(\d+)$/) || [])[1] || '',
+    albumId: albumIdOf(albumHref),
     albumHref,
     href: pagePath(track, country),
     artwork: artwork.url || '',
@@ -307,6 +307,11 @@ function collectionSnapshots(c) {
 /** QQ 音乐条目（歌曲、专辑、艺人、歌单、MV）：source 为 qq，或曲目快照来自 QQ */
 const adapterOf = (target) => target.source === 'ncm' || target.track?.source === 'ncm' ? ncm : qq;
 const isAdapter = (target) => ['qq', 'ncm'].includes(target.source) || ['qq', 'ncm'].includes(target.track?.source);
+const albumIdOf = (href) => {
+  const value = String(href || '');
+  const match = value.match(/\/(\d+)$/) || value.match(/\/album\/?\?id=([1-9][0-9]{0,18})(?:&|$)/);
+  return match?.[1] || '';
+};
 
 /** 条目在资料库中的 kind、id 与 source；不能加入资料库的条目为 null（QQ 音乐只有歌曲可以加入） */
 function libraryKey(target) {
@@ -359,7 +364,8 @@ async function addTargetToLibrary(target) {
 }
 
 async function ncmCollectionEntries(target) {
-  const id = (target.href || '').match(/^\/ncm-(?:album|playlist)\/([1-9][0-9]{0,18})\/?$/)?.[1];
+  let id = '';
+  try { id = ncm.parsePageId(new URL(target.href || '', location.origin), target.kind); } catch {}
   if (!id) return [];
   const songs = target.kind === 'album' ? ((await ncm.album(id)).songs || []).map(ncm.toTrack) : (await ncm.playlist(id)).songs;
   return songs.map(ncm.entryOf);

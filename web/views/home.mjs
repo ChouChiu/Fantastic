@@ -78,12 +78,13 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
   });
 
   const isUrlLike = (value) => /^https?:\/\//i.test(value);
+  const parseDirectLink = (value) => source === 'apple' ? parseAppleLink(value) : source === 'ncm' ? ncm.parseWebLink(value) : null;
 
   /* ---------- 输入框：链接直接打开，其余按关键词搜索 ---------- */
   $('form').addEventListener('submit', (event) => {
     event.preventDefault();
     const value = input.value.trim();
-    const link = source === 'apple' ? parseAppleLink(value) : null;
+    const link = parseDirectLink(value);
     if (link) { navigate('/' + link); return; }
     // 无法识别的链接与空输入给出提示
     errorKey = !value ? 'home.empty' : isUrlLike(value) ? 'home.invalid' : null;
@@ -102,13 +103,15 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
   /** 输入时即时提示识别结果：歌曲 / MV 等类型与地区；按钮在“解析”与“搜索”之间切换 */
   function renderDetect() {
     const value = input.value.trim();
-    const link = source === 'apple' && value && parseAppleLink(value);
+    const link = value && parseDirectLink(value);
     submitLabel.dataset.i18n = link ? 'home.submit' : 'home.search';
     submitLabel.textContent = t(submitLabel.dataset.i18n);
     detectEl.hidden = !link;
     if (!link) return;
-    const [, cc, kind] = link.match(/^https:\/\/music\.apple\.com\/(?:([a-z]{2})\/)?(song|music-video|post|album|playlist|artist|station|room|multi-room|grouping|curator|new\/top-charts|new)\b/);
-    detectEl.textContent = t(DETECT_LABELS[kind]) + (cc ? ` · ${cc.toUpperCase()}` : '');
+    const apple = link.match(/^https:\/\/music\.apple\.com\/(?:([a-z]{2})\/)?(song|music-video|post|album|playlist|artist|station|room|multi-room|grouping|curator|new\/top-charts|new)\b/);
+    const ncm = link.match(/^https:\/\/music\.163\.com\/(song|album|artist|playlist)\b/);
+    const kind = apple?.[2] || ncm?.[1];
+    detectEl.textContent = t(DETECT_LABELS[kind]);
   }
 
   // 示例链接：填入输入框，按“解析”即可打开
@@ -136,7 +139,7 @@ export function mount({ root, signal, player, navigate, onLangChange, toast, loa
     clearTimeout(suggestTimer);
     if (suggestController) suggestController.abort();
     const term = input.value.trim();
-    if (!term || (source === 'apple' && (parseAppleLink(term) || isUrlLike(term)))) { closeSuggest(); return; }
+    if (!term || ((source === 'apple' || source === 'ncm') && (parseDirectLink(term) || isUrlLike(term)))) { closeSuggest(); return; }
     suggestTimer = setTimeout(() => (source !== 'apple' ? loadQQSuggest(term) : loadSuggest(term)), 180);
   }
 

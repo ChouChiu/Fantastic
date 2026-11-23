@@ -996,6 +996,12 @@ async fn ncm_pages_and_assets_load_on_direct_navigation() {
     let state = Arc::new(AppState::new("http://localhost:12340".into()));
     for kind in ["song", "album", "artist", "playlist"] {
         assert_eq!(
+            get(state.clone(), &format!("/https://music.163.com/{kind}?id=347230"))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
             get(state.clone(), &format!("/ncm-{kind}/347230"))
                 .await
                 .status(),
@@ -1018,6 +1024,10 @@ async fn ncm_pages_and_assets_load_on_direct_navigation() {
         "/ncm-song/01",
         "/ncm-mv/123",
         "/ncm-album/9223372036854775808",
+        "/https://music.163.com/song?id=0",
+        "/https://music.163.com/song?id=01",
+        "/https://music.163.com/song?id=not-a-number",
+        "/https://music.163.com/song?foo=1&id=347230",
     ] {
         assert_eq!(
             get(state.clone(), path).await.status(),

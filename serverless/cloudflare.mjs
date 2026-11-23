@@ -38,7 +38,7 @@ async function route(request, env, ctx) {
     return response;
   }
 
-  if ((request.method === 'GET' || request.method === 'HEAD') && isPagePath(url.pathname)) {
+  if ((request.method === 'GET' || request.method === 'HEAD') && isPagePath(url.pathname, url.search)) {
     // 外壳是 dist/index.html，按 `/` 请求（请求 /index.html 会被重定向到 `/`）
     return env.ASSETS.fetch(new Request(new URL('/', request.url), { method: request.method, headers: request.headers }));
   }

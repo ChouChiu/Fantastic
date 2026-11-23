@@ -333,10 +333,13 @@
     return entry.promise;
   }
 
-  /** 专辑 id（albumHref 末尾的数字），没有时为空字符串 */
+  /** 专辑 id（Apple / legacy NCM 路径末尾，或官方 NCM query），没有时为空字符串 */
   function albumOf(entry) {
-    const m = entry && /\/(\d+)\/?$/.exec(entry.albumHref || '');
-    return m ? m[1] : '';
+    const href = entry?.albumHref || '';
+    const legacy = /\/(\d+)\/?$/.exec(href);
+    if (legacy) return legacy[1];
+    const ncm = /^\/https:\/{1,2}music\.163\.com\/album\/?\?id=([1-9][0-9]{0,18})(?:&|$)/.exec(href);
+    return ncm ? ncm[1] : '';
   }
 
   const api = { normalize, plan, ending, opening, fadeOutGain, fadeInGain, fetchAnalysis, albumOf, TUNING, STEP };

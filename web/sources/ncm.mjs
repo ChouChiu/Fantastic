@@ -38,10 +38,54 @@ function rememberedQuality() {
   } catch { return null; }
 }
 const query = (q) => q === undefined ? '' : `?quality=${qualityId(q)}`;
-export const songPath = (id) => `/ncm-song/${numericId(id)}`;
-export const albumPath = (id) => `/ncm-album/${numericId(id)}`;
-export const artistPath = (id) => `/ncm-artist/${numericId(id)}`;
-export const playlistPath = (id) => `/ncm-playlist/${numericId(id)}`;
+const PAGE_KINDS = new Set(['song', 'album', 'artist', 'playlist']);
+const PAGE_ID = '[1-9][0-9]{0,18}';
+const OFFICIAL_PAGE_RE = /^\/https:\/{1,2}music\.163\.com\/(song|album|artist|playlist)\/?$/;
+const OFFICIAL_LINK_RE = /^\/https:\/{1,2}music\.163\.com\/(song|album|artist|playlist)\/?(?:\?.*)?$/;
+const LEGACY_PAGE_RE = /^\/ncm-(song|album|artist|playlist)\/([1-9][0-9]{0,18})\/?$/;
+
+export const songPath = (id) => `/https://music.163.com/song?id=${numericId(id)}`;
+export const albumPath = (id) => `/https://music.163.com/album?id=${numericId(id)}`;
+export const artistPath = (id) => `/https://music.163.com/artist?id=${numericId(id)}`;
+export const playlistPath = (id) => `/https://music.163.com/playlist?id=${numericId(id)}`;
+
+/** Extract a page ID from either the official URL-shaped page path or its legacy alias. */
+export function parsePageId(url, kind) {
+  if (!PAGE_KINDS.has(kind)) return '';
+  let value = url;
+  if (!(value instanceof URL)) {
+    try { value = new URL(String(url || ''), 'https://fantastic.invalid'); } catch { return ''; }
+  }
+  const legacy = value.pathname.match(LEGACY_PAGE_RE);
+  if (legacy && legacy[1] === kind) {
+    try { return numericId(legacy[2]); } catch { return ''; }
+  }
+  const official = value.pathname.match(OFFICIAL_PAGE_RE);
+  if (!official || official[1] !== kind) return '';
+  const id = value.searchParams.get('id');
+  if (!id || !new RegExp(`^${PAGE_ID}$`).test(id)) return '';
+  try { return numericId(id); } catch { return ''; }
+}
+
+/** Parse an official music.163.com link pasted into the search box. */
+export function parseWebLink(raw) {
+  let value;
+  try { value = new URL(String(raw || '').trim()); } catch { return null; }
+  if (value.protocol !== 'https:' || value.hostname.toLowerCase() !== 'music.163.com') return null;
+  let kind = value.pathname.match(/^\/(song|album|artist|playlist)\/?$/i)?.[1]?.toLowerCase();
+  let id = value.searchParams.get('id');
+  // Mobile/share links sometimes put the page and query in `#/song?id=...`.
+  if (!kind) {
+    const hash = value.hash.match(/^#\/(song|album|artist|playlist)\/?(?:\?(.*))?$/i);
+    if (hash) {
+      kind = hash[1].toLowerCase();
+      id = new URLSearchParams(hash[2] || '').get('id');
+    }
+  }
+  if (!kind || !id || !new RegExp(`^${PAGE_ID}$`).test(id)) return null;
+  try { return `https://music.163.com/${kind}?id=${numericId(id)}`; } catch { return null; }
+}
+
 export const playUrl = (id, q) => `/ncm/song/${numericId(id)}/play${query(q)}`;
 export const downloadUrl = (id, q) => `/ncm/song/${numericId(id)}/download${query(q)}`;
 export function rawLyricsUrl(id, kind) {
@@ -49,8 +93,16 @@ export function rawLyricsUrl(id, kind) {
   return `/ncm/song/${numericId(id)}/lyrics/raw?kind=${kind}`;
 }
 export function webUrl(path) {
-  const match = String(path || '').match(/^\/ncm-(song|album|artist|playlist)\/([1-9][0-9]{0,18})\/?$/);
-  return match ? `https://music.163.com/${match[1]}?id=${numericId(match[2])}` : '';
+  const value = String(path || '');
+  const legacy = value.match(LEGACY_PAGE_RE);
+  if (legacy) {
+    try { return `https://music.163.com/${legacy[1]}?id=${numericId(legacy[2])}`; } catch { return ''; }
+  }
+  const official = value.match(OFFICIAL_LINK_RE);
+  if (!official) return '';
+  const id = value.match(/[?&]id=([1-9][0-9]{0,18})(?:&|$)/)?.[1];
+  if (!id) return '';
+  try { return `https://music.163.com/${official[1]}?id=${numericId(id)}`; } catch { return ''; }
 }
 export function artworkUrl(value) { return (typeof value === 'string' ? value : value?.url) || ''; }
 export function toTrack(dto) {

@@ -13,7 +13,7 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
   const { t } = window.AmI18n;
   const { AmI18n } = window;
   const $ = (id) => root.querySelector(`#${id}`);
-  const singerMid = url.pathname.match(/^\/ncm-artist\/([1-9][0-9]{0,18})\/?$/)?.[1];
+  const singerMid = ncm.parsePageId(url, 'artist');
   const actions = createActions({ signal, player, navigate, toast });
   let artist = null;
   let songs = [];

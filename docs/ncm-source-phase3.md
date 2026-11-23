@@ -27,7 +27,7 @@
 
 NCM 的数字 ID 使用正 i64 范围内的字符串；前端拒绝前导零和不安全的 JavaScript number。歌曲身份为 `ncm:<id>`，资料库键为 `ncm:song:<id>`，音质变体 ID 为 `ncm:<id>:<quality>`，因此与 Apple／QQ 的相同数字 ID 不会相撞。
 
-站内路径为 `/ncm-song/:id`、`/ncm-album/:id`、`/ncm-artist/:id`、`/ncm-playlist/:id`，对外分享转为 `https://music.163.com/<kind>?id=<id>`。`app.mjs` 和服务端 fallback 均支持直达。首页按照 `FANTASTIC_HOST.ncmEnabled` 显隐源入口，保留 URL／浏览器中的搜索源选择；搜索与建议按当前 adapter 分发，NCM 只有歌曲、专辑、歌手、歌单四类。切换搜索源不会切断正在播放的歌曲。
+站内规范路径为 `/https://music.163.com/<kind>?id=<id>`（歌曲、专辑、歌手、歌单），与官方链接形式一致；旧 `/ncm-<kind>/<id>` 仅作为兼容别名保留，对外分享使用 `https://music.163.com/<kind>?id=<id>`。`app.mjs` 和服务端 fallback 均支持直达。首页按照 `FANTASTIC_HOST.ncmEnabled` 显隐源入口，保留 URL／浏览器中的搜索源选择；搜索与建议按当前 adapter 分发，NCM 只有歌曲、专辑、歌手、歌单四类。切换搜索源不会切断正在播放的歌曲。
 
 `player.js` 的 `resolveEntry` 对 NCM 调用 capabilities／qualities，根据可用音质和浏览器解码能力产生原生播放变体；`attempt` 的 native 分支在设置 `audio.src` 前调用 `/ncm/song/:id/play`，解析 JSON 中的 URL 与实际音质信息。直链要求 HTTPS 且属于允许的 NCM CDN，服务端同时将 CDN HTTP 地址升级为 HTTPS。队列和变体只保留本地 API 地址，不保存会过期的 CDN URL。NCM 不经过 Apple master、解密或 AutoMix 音频分析。
 

@@ -28,7 +28,7 @@ export function mount({ root, url, signal, player, navigate, onLangChange, toast
   const { t } = window.AmI18n;
   const { formatTime } = window.AmHook;
   const $ = (id) => root.querySelector(`#${id}`);
-  const mid = url.pathname.match(/^\/ncm-song\/([1-9][0-9]{0,18})\/?$/)?.[1];
+  const mid = ncm.parsePageId(url, 'song');
   let track = null;
   let rows = [];
   let qualityState = 'loading';

@@ -1,5 +1,5 @@
 import { sourceOf } from './sources/track.mjs';
-import { fromSnapshot as ncmSnapshot, entryOf as ncmEntry } from './sources/ncm.mjs';
+import { fromSnapshot as ncmSnapshot, entryOf as ncmEntry, parsePageId as ncmPageId } from './sources/ncm.mjs';
 // 资料库与歌单（与 music.apple.com 的「资料库」「歌单」相同），全部保存在本浏览器的 IndexedDB 中，服务端不保存任何数据。
 // 启动时整库读入内存，读取都是同步的；修改先改内存、立即通知界面，再写入 IndexedDB；
 // 同一浏览器的其他标签页经 BroadcastChannel 收到通知后重新读取。IndexedDB 不可用时（如部分隐私模式）只保存在内存中，
@@ -56,8 +56,15 @@ const CATALOG_PLAYLIST_ID = /^pl\.[0-9A-Za-z_-]{1,64}$/;
 const NUMERIC_ID = /^[0-9]{1,20}$/;
 // QQ 音乐歌曲（source 为 qq）：id 为歌曲 mid，albumId 为专辑 mid，链接为本站前缀加 QQ 音乐官网地址
 const QQ_ID = /^[0-9A-Za-z]{1,32}$/;
-const NCM_PATH = /^\/ncm-(?:song|album|artist|playlist)\/[1-9][0-9]{0,18}\/?$/;
 const QQ_PATH = /^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/(?:songDetail|albumDetail|singer|playlist|mv\/v)\/[0-9A-Za-z]{1,32}$/;
+
+const NCM_KINDS = ['song', 'album', 'artist', 'playlist'];
+const ncmPath = (value) => {
+  try {
+    const url = new URL(value, 'https://fantastic.invalid');
+    return NCM_KINDS.some((kind) => !!ncmPageId(url, kind));
+  } catch { return false; }
+};
 
 function canonicalQQHref(value) {
   const match = value.match(/^\/qq-(song|album|artist|playlist|mv)\/([0-9A-Za-z]{1,32})\/?$/);
@@ -66,7 +73,7 @@ function canonicalQQHref(value) {
 }
 
 const str = (value, max = 300) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
-const href = (value) => { const s = canonicalQQHref(str(value, 600)); return SITE_PATH.test(s) || QQ_PATH.test(s) || NCM_PATH.test(s) ? s : ''; };
+const href = (value) => { const s = canonicalQQHref(str(value, 600)); return SITE_PATH.test(s) || QQ_PATH.test(s) || ncmPath(s) ? s : ''; };
 const art = (value) => { const s = str(value, 600); return ART.test(s) ? s : ''; };
 const color = (value) => (typeof value === 'string' && COLOR.test(value) ? value.toLowerCase() : '');
 const country = (value) => (typeof value === 'string' && /^[a-z]{2}$/i.test(value) ? value.toLowerCase() : 'us');

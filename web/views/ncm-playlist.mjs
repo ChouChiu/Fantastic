@@ -1,4 +1,4 @@
-// NCM 歌单页（/ncm-playlist/{id}），由 app.mjs 挂载。部分歌单上游取不到头部信息（作者），此时只显示歌曲
+// NCM 歌单页（/https://music.163.com/playlist?id={id}；旧 /ncm-playlist/{id} 兼容），由 app.mjs 挂载。部分歌单上游取不到头部信息（作者），此时只显示歌曲
 import * as ncm from '../sources/ncm.mjs';
 import { artUrl } from '../library.mjs';
 import { trackKey } from '../sources/track.mjs';
@@ -12,7 +12,7 @@ export const styles = ['/assets/views/qq-album.css'];
 export function mount({ root, url, signal, player, navigate, onLangChange, toast }) {
   const { t } = window.AmI18n;
   const $ = (id) => root.querySelector(`#${id}`);
-  const id = url.pathname.match(/^\/ncm-playlist\/([1-9][0-9]{0,18})\/?$/)?.[1];
+  const id = ncm.parsePageId(url, 'playlist');
   const actions = createActions({ signal, player, navigate, toast });
   const header = createDetailHeader({ $, signal, artUrl, rerender: renderHeader });
   let info = null;

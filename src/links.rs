@@ -29,10 +29,13 @@ pub fn is_regionless_link(path: &str) -> bool {
 }
 
 pub fn is_ncm_link(path: &str) -> bool {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
+    static LEGACY_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"^ncm-(?:song|album|artist|playlist)/([1-9][0-9]{0,18})/?$").unwrap()
     });
-    RE.captures(path).is_some_and(|caps| caps[1].parse::<i64>().is_ok())
+    static OFFICIAL_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^https:/{1,2}music\.163\.com/(?:song|album|artist|playlist)/?\?id=([1-9][0-9]{0,18})(?:&[^#]*)?$").unwrap()
+    });
+    LEGACY_RE.captures(path).or_else(|| OFFICIAL_RE.captures(path)).is_some_and(|caps| caps[1].parse::<i64>().is_ok())
 }
 
 pub fn is_qq_link(path: &str) -> bool {
@@ -171,6 +174,22 @@ mod tests {
         }
         for path in ["qq-song/123", "https://y.qq.com/n/ryqq/songDetail/", "https://y.qq.com/n/ryqq/songDetail/a-b", "https://y.qq.com/n/ryqq/songDetail/123//"] {
             assert!(!is_qq_link(path));
+        }
+        for kind in ["song", "album", "artist", "playlist"] {
+            assert!(is_ncm_link(&format!("https://music.163.com/{kind}?id=347230")));
+            assert!(is_ncm_link(&format!("https:/music.163.com/{kind}?id=347230&foo=bar")));
+            assert!(is_ncm_link(&format!("ncm-{kind}/347230")));
+        }
+        for path in [
+            "https://music.163.com/song?id=0",
+            "https://music.163.com/song?id=01",
+            "https://music.163.com/song?id=abc",
+            "https://music.163.com/song?foo=1&id=347230",
+            "https://music.163.com/song?id=9223372036854775808",
+            "https://music.163.com/song?id=347230#x",
+            "music.163.com/song?id=347230",
+        ] {
+            assert!(!is_ncm_link(path));
         }
     }
 

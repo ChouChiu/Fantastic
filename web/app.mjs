@@ -78,14 +78,21 @@ const LIBRARY_PATH = /^\/library(?:\/(?:recently-added|albums|songs|music-videos
 /** 本地歌单与「喜爱的歌曲」 */
 const LIBRARY_PLAYLIST_PATH = /^\/library\/(?:playlist\/p\.[0-9A-Za-z_-]+|favorite-songs)\/?$/;
 
+function validNcmPageId(value) {
+  if (!/^[1-9][0-9]{0,18}$/.test(value || '')) return false;
+  try { return BigInt(value) <= 9223372036854775807n; } catch { return false; }
+}
+
 /** 地址对应的页面名；不是站内页面时为 null（交给浏览器正常跳转）。与服务端一样匹配未解码的路径 */
-function route(url) {
+export function route(url) {
   if (url.origin !== location.origin) return null;
   if (url.pathname === '/') return 'home';
   const resource = regionlessResource(url.pathname);
   if (resource) return ({ songs: 'song', albums: 'album', playlists: 'playlist', artists: 'artist', 'music-videos': 'mv', 'uploaded-videos': 'post', stations: 'station' })[resource.type];
-  const ncmPage = url.pathname.match(/^\/ncm-(song|album|artist|playlist)\/[1-9][0-9]{0,18}\/?$/);
-  if (ncmPage && window.FANTASTIC_HOST?.ncmEnabled === true) return `ncm-${ncmPage[1]}`;
+  const ncmPage = url.pathname.match(/^\/ncm-(song|album|artist|playlist)\/([1-9][0-9]{0,18})\/?$/);
+  if (ncmPage && validNcmPageId(ncmPage[2]) && window.FANTASTIC_HOST?.ncmEnabled === true) return `ncm-${ncmPage[1]}`;
+  const ncmOfficial = url.pathname.match(/^\/https:\/{1,2}music\.163\.com\/(song|album|artist|playlist)\/?$/);
+  if (ncmOfficial && validNcmPageId(url.searchParams.get('id')) && window.FANTASTIC_HOST?.ncmEnabled === true) return `ncm-${ncmOfficial[1]}`;
   if (/^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/songDetail\/[0-9A-Za-z]{1,32}\/?$/.test(url.pathname)) return 'qq-song';
   if (/^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/singer\/[0-9A-Za-z]{1,32}\/?$/.test(url.pathname)) return 'qq-artist';
   if (/^\/https:\/{1,2}y\.qq\.com\/n\/ryqq\/albumDetail\/[0-9A-Za-z]{1,32}\/?$/.test(url.pathname)) return 'qq-album';

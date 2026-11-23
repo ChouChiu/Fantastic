@@ -85,6 +85,7 @@ test('path checks match src/amp.rs, src/state.rs and src/links.rs', () => {
     '/https://music.apple.com/cn/new', '/https://music.apple.com/cn/new/top-charts/songs', '/https://music.apple.com/us/multi-room/1532467784',
     '/https://music.apple.com/us/curator/1019400049', '/https:/music.apple.com/us/album/lover/1468058165',
     '/https://music.apple.com/song/name/123', '/https:/music.apple.com/album/123',
+    '/https://music.163.com/song?id=347230', '/https:/music.163.com/album?id=347230&foo=bar', '/ncm-artist/347230',
     '/https:/y.qq.com/n/ryqq/mv/v/123/', '/https://y.qq.com/n/ryqq/playlist/123',
     '/radio', '/https://music.apple.com/cn/radio', '/https://music.apple.com/us/station/apple-music-1/ra.978194965',
     '/https://music.apple.com/cn/station/ra.686227433',
@@ -98,6 +99,7 @@ test('path checks match src/amp.rs, src/state.rs and src/links.rs', () => {
     '/assets/missing.js', '/favicon.ico', '/radio/x', '/https://music.apple.com/us/station/apple-music-1',
     '/https://y.qq.com/n/ryqq/songDetail/', '/https://y.qq.com/n/ryqq/songDetail/123//', '/https://y.qq.com/n/ryqq/songDetail/../bad', '/https://y.qq.com/n/ryqq/songDetail/123/play', '/qq/song/123',
     '/https://y.qq.com/n/ryqq/singer/', '/https://y.qq.com/n/ryqq/singer/123//', '/https://y.qq.com/n/ryqq/singer/../bad', '/https://y.qq.com/n/ryqq/albumDetail/', '/https://y.qq.com/n/ryqq/albumDetail/123//', '/https://y.qq.com/n/ryqq/albumDetail/../bad',
+    '/https://music.163.com/song?id=0', '/https://music.163.com/song?foo=1&id=347230', '/https://music.163.com/song', '/ncm-song/0',
   ]) assert(!isPagePath(other), other);
 
   for (const ok of ['ra.978194965', 'ra.u-5e1a0b_x']) assert(validStationId(ok), ok);
