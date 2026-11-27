@@ -166,18 +166,21 @@ impl Toc {
         FRAME_LENGTHS[self.frame_rate_index]
     }
 
-    /// 返回 `(编码采样率分子, 分母, 输出采样率)`；若为 44.1 kHz 则两者相等。
+    /// 返回 `(编码采样率分子, 分母, 输出采样率)`；输出固定为 48 kHz。
     pub fn rates(&self) -> Result<(u64, u64, u32)> {
-        let delivered = if self.fs_index != 0 { 48000u32 } else { 44100u32 };
-        if self.fs_index == 0 {
-            return Ok((u64::from(delivered), 1, delivered));
-        }
+        let delivered = 48000u32;
         let (fr_num, fr_den) = FRAME_RATES[self.frame_rate_index];
+        // 帧率表以 48 kHz 系列为基准；44.1 kHz 系列按基础采样率同比缩放。
+        let (fr_num, fr_den) = if self.fs_index == 0 {
+            (fr_num * 44100, fr_den * 48000)
+        } else {
+            (fr_num, fr_den)
+        };
         let coded_num = self.frame_length() as u64 * fr_num;
         let g = gcd(coded_num, fr_den);
         let coded_num = coded_num / g;
         let coded_den = fr_den / g;
-        // ratio = delivered / coded = (delivered * coded_den) / coded_num
+        // 重采样比 = 输出率 / 编码率 = (delivered * coded_den) / coded_num。
         let r_num = u64::from(delivered) * coded_den;
         let r_den = coded_num;
         let rg = gcd(r_num, r_den);
@@ -835,5 +838,56 @@ impl<'a> TocReader<'a> {
             self.bits.read(2)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_toc;
+    use crate::stream::frame_samples;
+
+    fn minimal_frame(fs_index: u8, frame_rate_index: u8) -> [u8; 4] {
+        // 版本 2 的最小 TOC：无呈现、无节目 ID，单子流且不携带长度表。
+        [0x80, (fs_index << 2) | (frame_rate_index >> 2), (frame_rate_index & 3) << 6, 0x80]
+    }
+
+    #[test]
+    fn rates_44100_scale_coded_rate_and_deliver_48000() {
+        for (index, expected) in [
+            (0, (6_048_000, 143, 48000)),
+            (1, (42336, 1, 48000)),
+            (2, (47040, 1, 48000)),
+            (13, (44100, 1, 48000)),
+        ] {
+            let toc = read_toc(&minimal_frame(0, index)).unwrap();
+            assert_eq!(toc.fs_index, 0);
+            assert_eq!(toc.frame_rate_index, usize::from(index));
+            assert_eq!(toc.rates().unwrap(), expected, "frame_rate_index {index}");
+        }
+    }
+
+    #[test]
+    fn rates_48000_remain_unchanged() {
+        for (index, expected) in [
+            (0, (46_080_000, 1001, 48000)),
+            (1, (46080, 1, 48000)),
+            (2, (51200, 1, 48000)),
+            (13, (48000, 1, 48000)),
+        ] {
+            let toc = read_toc(&minimal_frame(1, index)).unwrap();
+            assert_eq!(toc.rates().unwrap(), expected, "frame_rate_index {index}");
+        }
+    }
+
+    #[test]
+    fn frame_samples_44100_counts_48000_output_samples() {
+        let expected = [2179, 2176, 2089, 1743, 1741, 1089, 1088, 1044, 871, 870, 522, 435, 435, 2229];
+        for (index, samples) in expected.into_iter().enumerate() {
+            let raw = minimal_frame(0, index as u8);
+            assert_eq!(frame_samples(&raw).unwrap(), samples, "frame_rate_index {index}");
+            let mut sync = vec![0xac, 0x40, 0, raw.len() as u8];
+            sync.extend_from_slice(&raw);
+            assert_eq!(frame_samples(&sync).unwrap(), samples, "sync frame_rate_index {index}");
+        }
     }
 }
