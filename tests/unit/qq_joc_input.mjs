@@ -130,7 +130,7 @@ test('QQ opener accepts Dolby JOC download routes, forwards cancellation and rej
       assert.equal(calls.at(-1).url, url);
       assert.equal(calls.at(-1).options.signal, controller.signal);
       assert.equal(calls.at(-1).options.credentials, 'same-origin');
-      assert.equal(calls.at(-1).options.redirect, 'error');
+      assert.equal(calls.at(-1).options.redirect, undefined);
     }
     const count = calls.length;
     for (const url of ['https://qq.com/file.mp4', '//qq.com/file.mp4', '/qq/song/WET/play?quality=DA', '/qq/song/WET/download?quality=HQ', '/qq/song/WET/download?quality=da', '/qq/song/WET/download?quality=DA&url=https://qq.com']) {
@@ -141,6 +141,32 @@ test('QQ opener accepts Dolby JOC download routes, forwards cancellation and rej
     await assert.rejects(openQqJocTrack('/qq/song/WET/download?quality=DAEAC3', controller.signal), { name: 'AbortError' });
     assert.equal(calls.length, count);
   } finally { globalThis.fetch = original; }
+});
+
+test('QQ opener reads redirected CDN audio responses for E-AC-3 and AC-4', async () => {
+  const ac4Samples = [ac4FrameBytes(1, 13, 10).payload];
+  for (const [quality, codec, samples] of [['DAEAC3', 'ec-3', packets], ['DA', 'ac-4', ac4Samples], ['DA448', 'ac-4', ac4Samples], ['DA1500', 'ac-4', ac4Samples]]) {
+    const data = mp4({ codec, sampleList: samples, sampleDuration: codec === 'ec-3' ? 1536 : 2048 });
+    const progress = [];
+    globalThis.fetch = async (url, options) => {
+      const request = new Request(new URL(url, 'https://fantastic.test'), options);
+      assert.equal(request.redirect, 'follow');
+      const response = new Response(data, { headers: { 'content-length': String(data.length) } });
+      Object.defineProperties(response, {
+        redirected: { value: true },
+        url: { value: 'https://isure.stream.qqmusic.qq.com/audio.m4a' },
+      });
+      return response;
+    };
+    const track = await openQqJocTrack(`/qq/song/WET/download?quality=${quality}`, undefined, (value) => progress.push(value));
+    assert.equal(track.codec, codec);
+    assert.ok(track.duration > 0);
+    assert.equal(progress.at(-1).downloaded, data.length);
+    assert.equal(progress.at(-1).percent, 100);
+    const decoded = samplesFromFragment(new Uint8Array(await track.load(track.segments[0])));
+    assert.equal(decoded.length, samples.length);
+    samples.forEach((expected, i) => assert.deepEqual(decoded[i], expected));
+  }
 });
 
 test('QQ JOC opener reports streamed byte progress with and without Content-Length', async () => {

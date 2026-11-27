@@ -276,11 +276,11 @@ export function qqJocTrack(input) {
   } };
 }
 
-/** Only the backend may follow QQ's CDN URL or choose the regional egress. */
+/** 浏览器跟随本地 302，直接读取支持 CORS 的 QQ CDN 音频，服务端不转发媒体字节。 */
 export async function openQqJocTrack(url, signal, onProgress) {
   if (typeof url !== 'string' || !DOWNLOAD.test(url)) fail('expected local QQ download URL');
   aborted(signal);
-  const response = await fetch(url, { signal, credentials: 'same-origin', redirect: 'error' });
+  const response = await fetch(url, { signal, credentials: 'same-origin' });
   if (!response.ok) fail(`download HTTP ${response.status}`);
   const lengthHeader = response.headers?.get?.('content-length') ?? response.headers?.['content-length'];
   const total = Number.isSafeInteger(Number(lengthHeader)) && Number(lengthHeader) > 0 ? Number(lengthHeader) : null;
